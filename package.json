@@ -1,0 +1,17 @@
+{
+  "name": "pos-backend",
+  "private": true,
+  "packageManager": "pnpm@10.25.0",
+  "workspaces": [
+    "services/*",
+    "shared/*"
+  ],
+  "devDependencies": {
+    "turbo": "latest"
+  },
+  "scripts": {
+    "dev": "turbo run dev --parallel",
+    "build": "turbo run build",
+    "start": "turbo run start"
+  }
+}

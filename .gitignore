@@ -1,0 +1,7 @@
+# compiled output
+/dist
+/node_modules
+/build
+.turbo
+node_modules/
+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
