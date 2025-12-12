@@ -28,33 +28,33 @@ import { SuccessResponseDto } from '../common/dto/success-response.dto';
 export class RestaurantsController {
   constructor(private readonly restaurantsService: RestaurantsService) {}
 
-  @Post()
-  @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Create a new restaurant' })
-  @ApiBody({ type: CreateRestaurantDto })
-  @ApiResponse({
-    status: 201,
-    description: 'Restaurant created successfully',
-    type: SuccessResponseDto,
-  })
-  @ApiResponse({
-    status: 409,
-    description: 'Restaurant with email or slug already exists',
-  })
-  @ApiResponse({
-    status: 400,
-    description: 'Bad Request - Validation failed',
-  })
-  async create(
-    @Body() createRestaurantDto: CreateRestaurantDto,
-  ): Promise<SuccessResponseDto<any>> {
-    const restaurant =
-      await this.restaurantsService.create(createRestaurantDto);
-    return new SuccessResponseDto(
-      restaurant,
-      'Restaurant created successfully',
-    );
-  }
+  // @Post()
+  // @HttpCode(HttpStatus.CREATED)
+  // @ApiOperation({ summary: 'Create a new restaurant' })
+  // @ApiBody({ type: CreateRestaurantDto })
+  // @ApiResponse({
+  //   status: 201,
+  //   description: 'Restaurant created successfully',
+  //   type: SuccessResponseDto,
+  // })
+  // @ApiResponse({
+  //   status: 409,
+  //   description: 'Restaurant with email or slug already exists',
+  // })
+  // @ApiResponse({
+  //   status: 400,
+  //   description: 'Bad Request - Validation failed',
+  // })
+  // async create(
+  //   @Body() createRestaurantDto: CreateRestaurantDto,
+  // ): Promise<SuccessResponseDto<any>> {
+  //   const restaurant =
+  //     await this.restaurantsService.create(createRestaurantDto);
+  //   return new SuccessResponseDto(
+  //     restaurant,
+  //     'Restaurant created successfully',
+  //   );
+  // }
 
   @Get()
   @ApiOperation({ summary: 'Get all restaurants' })
