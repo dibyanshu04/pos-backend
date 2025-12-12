@@ -7,6 +7,8 @@ module.exports = {
       env: {
         PORT: 3001,
         NODE_ENV: "production",
+	MONGODB_URI: "mongodb+srv://dibs04:Tiger123@dibs.n1lrcnr.mongodb.net/auth-service",
+        JWT_SECRET: "mySuperSecretKey",
       },
     },
     // 3. Order Service - Port 3003
