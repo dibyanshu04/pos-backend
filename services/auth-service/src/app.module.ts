@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 
 import { AppController } from './app.controller';
@@ -17,9 +17,13 @@ import { RBACInitializer } from './rbac/rbac.init';
       envFilePath: '.env',
     }),
 
-    MongooseModule.forRoot(
-      'mongodb+srv://dibs04:Tiger123@dibs.n1lrcnr.mongodb.net/auth-service',
-    ),
+    MongooseModule.forRootAsync({
+      imports: [ConfigModule],
+      useFactory: async (configService: ConfigService) => ({
+        uri: configService.get<string>('MONGODB_URI'),
+      }),
+      inject: [ConfigService],
+    }),
 
     AuthModule,
     UsersModule,
