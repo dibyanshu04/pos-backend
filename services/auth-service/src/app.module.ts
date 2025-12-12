@@ -34,6 +34,6 @@ export class AppModule {
   constructor(private readonly rbacInit: RBACInitializer) {}
 
   async onModuleInit() {
-    await this.rbacInit.initialize();
+//    await this.rbacInit.initialize();
   }
 }

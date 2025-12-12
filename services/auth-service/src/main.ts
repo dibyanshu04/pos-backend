@@ -43,7 +43,7 @@ async function bootstrap() {
   });
 
   const port = process.env.PORT || 3001;
-  await app.listen(port);
+  await app.listen(port, '0.0.0.0');
   const baseUrl = process.env.BASE_URL || `http://localhost`;
   // Server Startup Logs
   console.log('🔐 ======================================== 🔐');
