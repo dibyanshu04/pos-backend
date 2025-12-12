@@ -10,7 +10,7 @@ module.exports = {
         JWT_SECRET: "mySuperSecretKey",
       JWT_REFRESH_EXPIRES_IN: "7d",
       JWT_EXPIRES_IN: "7d",
-      MONGODB_URI: "mongodb + srv://dibs04:Tiger123@dibs.n1lrcnr.mongodb.net/auth-service",
+      MONGODB_URI: "mongodb+srv://dibs04:Tiger123@dibs.n1lrcnr.mongodb.net/auth-service",
       BASE_URL: "140.245.12.83",
       },
     },
