@@ -11,7 +11,7 @@ import { OrdersModule } from './orders/orders.module';
       isGlobal: true,
     }),
     MongooseModule.forRoot(
-      process.env.MONGODB_URI || 'mongodb://localhost:27017/order-service',
+      process.env.MONGODB_URI || 'mongodb+srv://dibs04:Tiger123@dibs.n1lrcnr.mongodb.net/order-service',
     ),
     OrdersModule,
   ],

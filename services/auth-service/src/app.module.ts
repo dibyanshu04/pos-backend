@@ -18,7 +18,7 @@ import { RBACInitializer } from './rbac/rbac.init';
     }),
 
     MongooseModule.forRoot(
-      process.env.MONGODB_URI || 'mongodb+srv://dibs04:Tiger123@dibs.n1lrcnr.mongodb.net/auth-service',
+      'mongodb+srv://dibs04:Tiger123@dibs.n1lrcnr.mongodb.net/auth-service',
     ),
 
     AuthModule,
@@ -34,6 +34,6 @@ export class AppModule {
   constructor(private readonly rbacInit: RBACInitializer) {}
 
   async onModuleInit() {
-//    await this.rbacInit.initialize();
+    await this.rbacInit.initialize();
   }
 }
