@@ -53,7 +53,7 @@ export class RestaurantsController {
   //   return new SuccessResponseDto(
   //     restaurant,
   //     'Restaurant created successfully',
-  //   )
+  //   );
   // }
 
   @Get()
