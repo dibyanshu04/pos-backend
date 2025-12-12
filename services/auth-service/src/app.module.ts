@@ -18,7 +18,7 @@ import { RBACInitializer } from './rbac/rbac.init';
     }),
 
     MongooseModule.forRoot(
-      process.env.MONGODB_URI || 'mongodb://localhost:27017/auth-service',
+      process.env.MONGODB_URI || 'mongodb+srv://dibs04:Tiger123@dibs.n1lrcnr.mongodb.net/auth-service',
     ),
 
     AuthModule,

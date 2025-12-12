@@ -42,7 +42,7 @@ async function bootstrap() {
   });
 
   const port = process.env.PORT || 3005;
-  await app.listen(port);
+  await app.listen(port, '0.0.0.0');
 
   // Server Startup Logs
   console.log('🚀 ======================================== 🚀');
