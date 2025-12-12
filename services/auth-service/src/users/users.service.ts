@@ -20,10 +20,7 @@ export class UsersService {
     return this.userModel.findOne({ email }).exec();
   }
   async findByEmailWithAccess(email: string) {
-    return this.userModel
-      .findOne({ email })
-      .lean()
-      
+    return this.userModel.findOne({ email }).lean();
   }
 
   async findById(id: string): Promise<UserDocument | null> {
@@ -31,19 +28,7 @@ export class UsersService {
   }
 
   async findSuperAdmin(): Promise<UserDocument | null> {
-    const super_admin_role: any = await this.roleModel
-      .findOne({ name: 'SUPER_ADMIN' })
-      .exec();
-    if (!super_admin_role) {
-      return null;
-    }
-    const super_admin = await this.userModel
-      .findOne({ platformRole: super_admin_role._id.toString() })
-      .exec();
-    if (!super_admin) {
-      return null;
-    }
-    return super_admin;
+    return this.userModel.findOne({ email: 'admin@platform.com' });
   }
 
   async updateLastLogin(userId: string): Promise<void> {
