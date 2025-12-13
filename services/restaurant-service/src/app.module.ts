@@ -7,6 +7,7 @@ import { RestaurantsModule } from './restaurants/restaurants.module';
 import { OnboardingModule } from './onboarding/onboarding.module'; // Add this
 import { OutletsModule } from './outlets/outlets.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
+import { TableModule } from './tables/table.module';
 
 @Module({
   imports: [
@@ -19,7 +20,8 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
     RestaurantsModule,
     OutletsModule,
     OnboardingModule,
-    SubscriptionsModule
+    SubscriptionsModule,
+    TableModule,
   ],
   controllers: [AppController],
   providers: [AppService],
