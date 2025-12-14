@@ -12,7 +12,11 @@ async function bootstrap() {
   app.useGlobalPipes(new ValidationPipe());
   app.useGlobalFilters(new GlobalExceptionFilter());
   app.useGlobalInterceptors(new SuccessResponseInterceptor());
-  app.enableCors();
+  app.enableCors({
+    origin: true, // reflect request origin
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+    allowedHeaders: 'Content-Type, Authorization',
+  });
   
   app.use(morgan('dev'));
 

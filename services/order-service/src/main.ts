@@ -18,7 +18,11 @@ async function bootstrap() {
   );
   app.useGlobalFilters(new GlobalExceptionFilter());
   app.useGlobalInterceptors(new SuccessResponseInterceptor());
-  app.enableCors();
+  app.enableCors({
+    origin: true, // reflect request origin
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+    allowedHeaders: 'Content-Type, Authorization',
+  });
   app.use(morgan('dev'));
   // Swagger configuration - MUST come after global setup
   const config = new DocumentBuilder()
