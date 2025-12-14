@@ -9,10 +9,10 @@ import { UpdateTableDto } from './dto/update-table.dto';
 export class TableService {
   constructor(@InjectModel(Table.name) private tableModel: Model<Table>) {}
 
-  async create(dto: CreateTableDto) {
+  async create(createTableDto: CreateTableDto) {
     const exists = await this.tableModel.findOne({
-      tableNumber: dto.tableNumber,
-      outletId: dto.outletId,
+      name: createTableDto.name,
+      outletId: createTableDto.outletId,
       isDeleted: false,
     });
 
@@ -20,14 +20,15 @@ export class TableService {
       throw new Error('A table with this number already exists in this outlet');
     }
 
-    return this.tableModel.create(dto);
+    const createdTable = new this.tableModel(createTableDto);
+    return createdTable.save();
   }
 
   async findAll(outletId: string) {
     return this.tableModel.find({
       outletId,
       isDeleted: false,
-    });
+    }).populate('areaId');
   }
 
   async findOne(id: string) {

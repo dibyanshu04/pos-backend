@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument } from 'mongoose';
+import { HydratedDocument, Types } from 'mongoose';
 import * as mongoose from 'mongoose';
 
 export type TableDocument = HydratedDocument<Table>;
@@ -7,7 +7,7 @@ export type TableDocument = HydratedDocument<Table>;
 @Schema({ timestamps: true })
 export class Table {
   @Prop({ required: true })
-  tableNumber: string; // Example: "T1", "Table-2"
+  name: string; // Example: "T1", "Table-2"
 
   @Prop({ required: false })
   seatingCapacity: number;
@@ -19,15 +19,23 @@ export class Table {
   status: string;
 
   @Prop({
-    type: mongoose.Schema.Types.ObjectId,
+    type: Types.ObjectId,
     ref: 'Outlet',
     required: true,
     index: true,
   })
-  outletId: string;
+  outletId: Types.ObjectId;
 
   @Prop({ default: false })
   isDeleted: boolean; // Soft delete
+
+  @Prop({
+    type: Types.ObjectId,
+    ref: 'Area',
+    required: true,
+    index: true,
+  })
+  areaId: Types.ObjectId;
 }
 
 export const TableSchema = SchemaFactory.createForClass(Table);

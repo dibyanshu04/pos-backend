@@ -8,6 +8,7 @@ import { OnboardingModule } from './onboarding/onboarding.module'; // Add this
 import { OutletsModule } from './outlets/outlets.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { TableModule } from './tables/table.module';
+import { AreaModule } from './area/area.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { TableModule } from './tables/table.module';
     OnboardingModule,
     SubscriptionsModule,
     TableModule,
+    AreaModule,
   ],
   controllers: [AppController],
   providers: [AppService],
