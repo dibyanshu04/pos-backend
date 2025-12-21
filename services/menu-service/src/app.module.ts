@@ -6,6 +6,7 @@ import { AppService } from './app.service';
 import { CategoriesModule } from './categories/categories.module';
 import { ItemsModule } from './items/items.module';
 import { MenusModule } from './menus/menu.module';
+import { VariantsModule } from './variants/variants.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { MenusModule } from './menus/menu.module';
     MenusModule,
     CategoriesModule,
     ItemsModule,
+    VariantsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
