@@ -1,53 +1,92 @@
 module.exports = {
   apps: [
+    /* =========================
+       AUTH SERVICE
+    ========================== */
     {
       name: "auth-service",
-      script: "./services/auth-service/dist/main.js", // Points to the BUILD file
-      "cmd": "./services/auth-service",
+      script: "dist/main.js",
+      cwd: "./services/auth-service",
+      exec_mode: "fork",
+      instances: 1,
       env: {
         PORT: 3001,
         NODE_ENV: "production",
+
         JWT_SECRET: "mySuperSecretKey",
-      JWT_REFRESH_EXPIRES_IN: "7d",
-      JWT_EXPIRES_IN: "7d",
-      MONGODB_URI: "mongodb+srv://dibs04:Tiger123@dibs.n1lrcnr.mongodb.net/auth-service",
-      BASE_URL: "140.245.12.83",
+        JWT_EXPIRES_IN: "7d",
+        JWT_REFRESH_EXPIRES_IN: "7d",
+
+        MONGODB_URI:
+          "mongodb+srv://dibs04:Tiger123@dibs.n1lrcnr.mongodb.net/auth-service",
+
+        BASE_URL: "https://api.nishchint.in",
       },
     },
-    // 3. Order Service - Port 3003
+
+    /* =========================
+       ORDER SERVICE
+    ========================== */
     {
       name: "order-service",
-      script: "./services/order-service/dist/main.js",
+      script: "dist/main.js",
+      cwd: "./services/order-service",
+      exec_mode: "fork",
+      instances: 1,
       env: {
         PORT: 3003,
-          NODE_ENV: "production",
-          MONGODB_URI: "mongodb+srv://dibs04:Tiger123@dibs.n1lrcnr.mongodb.net/order-service",
-          JWT_SECRET: "mySuperSecretKey",
+        NODE_ENV: "production",
+
+        JWT_SECRET: "mySuperSecretKey",
+        MONGODB_URI:
+          "mongodb+srv://dibs04:Tiger123@dibs.n1lrcnr.mongodb.net/order-service",
       },
     },
-    // 4. Menu Service - Port 3004
+
+    /* =========================
+       MENU SERVICE
+    ========================== */
     {
       name: "menu-service",
-      script: "./services/menu-service/dist/main.js",
+      script: "dist/main.js",
+      cwd: "./services/menu-service",
+      exec_mode: "fork",
+      instances: 1,
       env: {
         PORT: 3004,
-          NODE_ENV: "production",
-          MONGODB_URI: "mongodb+srv://dibs04:Tiger123@dibs.n1lrcnr.mongodb.net/menu-service",
-          JWT_SECRET: "mySuperSecretKey",
+        NODE_ENV: "production",
+
+        JWT_SECRET: "mySuperSecretKey",
+        MONGODB_URI:
+          "mongodb+srv://dibs04:Tiger123@dibs.n1lrcnr.mongodb.net/menu-service",
       },
     },
-    // 5. Restaurant Service - Port 3005
+
+    /* =========================
+       RESTAURANT SERVICE
+    ========================== */
     {
       name: "restaurant-service",
-      script: "./services/restaurant-service/dist/main.js",
+      script: "dist/main.js",
+      cwd: "./services/restaurant-service",
+      exec_mode: "fork",
+      instances: 1,
       env: {
         PORT: 3005,
-          NODE_ENV: "production",
-          MONGODB_URI: "mongodb+srv://dibs04:Tiger123@dibs.n1lrcnr.mongodb.net/restaurant-service",
-          JWT_SECRET: "mySuperSecretKey",
-          OWNER_ROLE_ID : "693ab3b0119b4483345478b6",
-            AUTH_SERVICE_URL : "http://140.245.12.83:3001",
-            MENU_SERVICE_URL : "http://140.245.12.83:3004"
+        NODE_ENV: "production",
+
+        JWT_SECRET: "mySuperSecretKey",
+        OWNER_ROLE_ID: "693ab3b0119b4483345478b6",
+
+        MONGODB_URI:
+          "mongodb+srv://dibs04:Tiger123@dibs.n1lrcnr.mongodb.net/restaurant-service",
+
+        /* 🔥 INTERNAL SERVICE CALLS */
+        AUTH_SERVICE_URL: "http://localhost:3001",
+        MENU_SERVICE_URL: "http://localhost:3004",
+
+        /* 🔥 PUBLIC API */
+        PUBLIC_API_URL: "https://api.nishchint.in",
       },
     },
   ],
