@@ -28,6 +28,7 @@ async function bootstrap() {
     .addTag('menus', 'Menu management endpoints')
     .addTag('menu-items', 'Menu items management endpoints')
     .addTag('variants', 'Variant management endpoints')
+    .addTag('addons', 'Addon management endpoints')
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
