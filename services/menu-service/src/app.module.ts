@@ -7,6 +7,7 @@ import { CategoriesModule } from './categories/categories.module';
 import { ItemsModule } from './items/items.module';
 import { MenusModule } from './menus/menu.module';
 import { VariantsModule } from './variants/variants.module';
+import { AddonsModule } from './addons/addons.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { VariantsModule } from './variants/variants.module';
     CategoriesModule,
     ItemsModule,
     VariantsModule,
+    AddonsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
