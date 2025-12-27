@@ -23,7 +23,6 @@ async function bootstrap() {
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     allowedHeaders: 'Content-Type, Authorization',
   });
-  app.setGlobalPrefix('auth');
   // Swagger Configuration
   const config = new DocumentBuilder()
     .setTitle('Restaurant POS - Auth Service API')
