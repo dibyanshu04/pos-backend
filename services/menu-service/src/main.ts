@@ -17,7 +17,7 @@ async function bootstrap() {
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     allowedHeaders: 'Content-Type, Authorization',
   });
-  
+  app.setGlobalPrefix('menu');
   app.use(morgan('dev'));
 
   // Swagger setup for Menu Service
