@@ -254,6 +254,9 @@ importers:
       class-validator:
         specifier: ^0.14.2
         version: 0.14.3
+      mongoose:
+        specifier: ^9.0.1
+        version: 9.0.1(socks@2.8.7)
       morgan:
         specifier: ^1.10.1
         version: 1.10.1
