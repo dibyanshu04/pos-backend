@@ -8,6 +8,7 @@ import { ItemsModule } from './items/items.module';
 import { MenusModule } from './menus/menu.module';
 import { VariantsModule } from './variants/variants.module';
 import { AddonsModule } from './addons/addons.module';
+import { TaxesModule } from './taxes/taxes.module';
 
 @Module({
   imports: [
@@ -15,9 +16,11 @@ import { AddonsModule } from './addons/addons.module';
       isGlobal: true,
     }),
     MongooseModule.forRoot(
-      process.env.MONGODB_URI || 'mongodb+srv://dibs04:Tiger123@dibs.n1lrcnr.mongodb.net/menu-service',
+      process.env.MONGODB_URI ||
+        'mongodb+srv://dibs04:Tiger123@dibs.n1lrcnr.mongodb.net/menu-service',
     ),
     MenusModule,
+    TaxesModule,
     CategoriesModule,
     ItemsModule,
     VariantsModule,
