@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import * as inquirer from 'inquirer';
+import inquirer from 'inquirer';
 import * as path from 'path';
 import * as fs from 'fs-extra';
 import { TemplateEngine, TemplateContext } from './utils/template-engine';

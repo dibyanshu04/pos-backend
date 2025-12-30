@@ -7,7 +7,9 @@
     "shared/*"
   ],
   "devDependencies": {
-    "turbo": "latest"
+    "ts-node": "^10.9.2",
+    "turbo": "latest",
+    "typescript": "^5.9.3"
   },
   "scripts": {
     "dev": "turbo run dev --parallel",
@@ -16,5 +18,12 @@
     "generate": "ts-node tools/generators/src/index.ts",
     "generate:module": "ts-node tools/generators/src/index.ts",
     "generate:feature": "ts-node tools/generators/src/index.ts"
+  },
+  "dependencies": {
+    "@types/fs-extra": "^11.0.4",
+    "@types/inquirer": "^9.0.9",
+    "fs-extra": "^11.3.3",
+    "inquirer": "^13.1.0",
+    "prettier": "^3.7.4"
   }
 }

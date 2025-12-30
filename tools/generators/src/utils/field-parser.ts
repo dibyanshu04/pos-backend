@@ -135,14 +135,14 @@ export function parseFieldType(field: FieldDefinition): {
 
 export function getFieldDecorators(field: FieldDefinition): string[] {
   const { decorators } = parseFieldType(field);
-  return decorators;
+  return decorators.decorators;
 }
 
 export function getAllValidators(fields: FieldDefinition[]): string[] {
   const allValidators = new Set<string>();
   fields.forEach((field) => {
-    const { validators } = parseFieldType(field);
-    validators.forEach((v) => allValidators.add(v));
+    const result = parseFieldType(field);
+    result.decorators.validators.forEach((v: string) => allValidators.add(v));
   });
   return Array.from(allValidators);
 }
