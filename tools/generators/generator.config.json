@@ -1,0 +1,53 @@
+{
+  "defaults": {
+    "hasRestaurantId": true,
+    "hasStatus": true,
+    "hasRank": false,
+    "timestamps": true
+  },
+  "fieldTypes": {
+    "string": {
+      "validators": ["IsString"],
+      "trim": true
+    },
+    "number": {
+      "validators": ["IsNumber"],
+      "min": 0
+    },
+    "boolean": {
+      "validators": ["IsBoolean"]
+    },
+    "date": {
+      "validators": ["IsDateString"]
+    },
+    "enum": {
+      "validators": ["IsEnum"]
+    },
+    "array": {
+      "validators": ["IsArray"]
+    },
+    "object": {
+      "validators": ["ValidateNested"]
+    }
+  },
+  "commonFields": {
+    "restaurantId": {
+      "type": "string",
+      "required": true,
+      "description": "Restaurant ID for scoping resources"
+    },
+    "status": {
+      "type": "enum",
+      "enum": ["Active", "Inactive"],
+      "default": "Active",
+      "description": "Resource status"
+    },
+    "rank": {
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "description": "Display order/ranking"
+    }
+  }
+}
+
