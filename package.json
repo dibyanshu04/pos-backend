@@ -12,6 +12,9 @@
   "scripts": {
     "dev": "turbo run dev --parallel",
     "build": "turbo run build",
-    "start": "turbo run start"
+    "start": "turbo run start",
+    "generate": "ts-node tools/generators/src/index.ts",
+    "generate:module": "ts-node tools/generators/src/index.ts",
+    "generate:feature": "ts-node tools/generators/src/index.ts"
   }
 }
