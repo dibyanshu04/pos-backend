@@ -53,11 +53,23 @@ export class CreateItemDto {
   @Min(0)
   basePrice: number;
 
-  @ApiProperty({ default: 0 })
-  @IsNumber()
-  @Min(0)
-  @Max(100)
-  taxRate: number;
+  @ApiProperty({ required: false, type: [String], default: [], description: 'Array of Tax IDs to apply to this item' })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  taxIds?: string[];
+
+  @ApiProperty({ required: false, type: [String], default: [], description: 'Array of Variant IDs applicable to this item' })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  variantIds?: string[];
+
+  @ApiProperty({ required: false, type: [String], default: [], description: 'Array of Addon IDs applicable to this item' })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  addonIds?: string[];
 
   @ApiProperty()
   @IsString()
@@ -104,9 +116,17 @@ export class CreateItemDto {
   @IsIn(['Dine-In', 'Takeaway', 'Delivery', 'Expose-Online'], { each: true })
   orderType?: ('Dine-In' | 'Takeaway' | 'Delivery' | 'Expose-Online')[];
 
-  @ApiProperty({ required: false, type: [VariationDto] })
+  @ApiProperty({ required: false, type: [VariationDto], description: 'Legacy inline variations (deprecated - use variantIds instead)' })
   @IsOptional()
   @ValidateNested({ each: true })
   @Type(() => VariationDto)
   variations?: VariationDto[];
+
+  @ApiProperty({
+    required: false,
+    description: 'Override variant prices for this item. Format: { variantId: { variantValueName: priceOverride } }',
+    example: { 'variant_id_123': { 'Large': 50 } },
+  })
+  @IsOptional()
+  variantPricing?: Record<string, Record<string, number>>;
 }

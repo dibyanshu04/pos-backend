@@ -3,6 +3,21 @@ import { Document, Schema as MongooseSchema, Types } from 'mongoose';
 
 export type ItemDocument = Item & Document;
 
+// Item-specific variant pricing override
+@Schema({ _id: false })
+export class ItemVariantPricing {
+  @Prop({ required: true, type: Types.ObjectId, ref: 'Variant' })
+  variantId: string; // Reference to Variant
+
+  @Prop({ required: true, type: String })
+  variantValueName: string; // Variant value name (e.g., "Large")
+
+  @Prop({ default: 0, min: 0 })
+  priceOverride?: number; // Override price for this variant on this item
+}
+
+export const ItemVariantPricingSchema = SchemaFactory.createForClass(ItemVariantPricing);
+
 @Schema({ timestamps: true })
 export class Item {
   @Prop({ required: true })
@@ -18,28 +33,45 @@ export class Item {
   })
   categoryId: string;
 
-  onlineDisplayName: string;
+  @Prop()
+  onlineDisplayName?: string;
 
   @Prop()
-  description: string;
+  description?: string;
 
-  dietaryType: {
-    type: String;
-    enum: ['Veg', 'Non-Veg', 'Egg', 'Vegan', 'Jain', 'Gluten-Free'];
-  };
+  @Prop({
+    type: String,
+    enum: ['Veg', 'Non-Veg', 'Egg', 'Vegan', 'Jain', 'Gluten-Free'],
+  })
+  dietaryType?: string;
 
-  @Prop({ required: true })
+  @Prop({ required: true, min: 0 })
   basePrice: number;
 
-  gstType: {
-    type: String;
-    enum: ['Goods', 'Service'];
-  };
-  @Prop({ required: true, default: 0 })
-  taxRate: number;
+  @Prop({
+    type: String,
+    enum: ['Goods', 'Service'],
+  })
+  gstType?: string;
+
+  // Tax References (Petpooja style - items select taxes)
+  @Prop({ type: [String], default: [] })
+  taxIds?: string[]; // Array of Tax IDs selected for this item
+
+  // Variant References (reference to Variant module)
+  @Prop({ type: [Types.ObjectId], ref: 'Variant', default: [] })
+  variantIds?: string[]; // Array of Variant IDs applicable to this item
+
+  // Item-specific variant pricing overrides
+  @Prop({ type: [ItemVariantPricingSchema], default: [] })
+  variantPricing?: ItemVariantPricing[]; // Override variant prices for this item
+
+  // Addon References (reference to Addon module)
+  @Prop({ type: [Types.ObjectId], ref: 'Addon', default: [] })
+  addonIds?: string[]; // Array of Addon IDs applicable to this item
 
   @Prop({ type: Types.ObjectId, ref: 'Item' })
-  baseItemId: string;
+  baseItemId?: string;
 
   @Prop({ required: true })
   outletId: string;
@@ -47,44 +79,56 @@ export class Item {
   @Prop({ default: true })
   isAvailable: boolean;
 
-  @Prop([String])
-  dietaryTags: string[];
+  @Prop({ type: [String], default: [] })
+  dietaryTags?: string[];
 
   @Prop()
-  imageUrl: string;
+  imageUrl?: string;
 
-  orderType: {
-    type: [String];
-    enum: ['Dine-In', 'Takeaway', 'Delivery', 'Expose-Online'];
-  };
+  @Prop({
+    type: [String],
+    enum: ['Dine-In', 'Takeaway', 'Delivery', 'Expose-Online'],
+    default: [],
+  })
+  orderType?: string[];
 
-  variations: [
-    {
-      name: string;
-      price: number;
-      isDefault: boolean;
-    },
-  ];
+  // Legacy inline variations (deprecated - use variantIds instead)
+  // Kept for backward compatibility
+  @Prop({
+    type: [
+      {
+        name: { type: String },
+        price: { type: Number },
+        isDefault: { type: Boolean, default: false },
+      },
+    ],
+    default: [],
+  })
+  variations?: Array<{
+    name: string;
+    price: number;
+    isDefault?: boolean;
+  }>;
 
-  // @Prop({ default: 0 })
-  // preparationTime: number;
+  // Additional metadata
+  @Prop({ default: 0 })
+  preparationTime?: number; // Preparation time in minutes
 
-  // @Prop({ default: 0 })
-  // displayOrder: number;
+  @Prop({ default: 0 })
+  displayOrder?: number; // Display order in menu
 
-  // @Prop({ type: Object })
-  // channelSpecificData: {
-  //   zomato?: {
-  //     itemId?: string;
-  //     price?: number;
-  //     isAvailable?: boolean;
-  //   };
-  //   swiggy?: {
-  //     itemId?: string;
-  //     price?: number;
-  //     isAvailable?: boolean;
-  //   };
-  // };
+  @Prop({ default: false })
+  isRecommended?: boolean; // Recommended item flag
+
+  @Prop({ default: false })
+  isPopular?: boolean; // Popular item flag
 }
 
 export const ItemSchema = SchemaFactory.createForClass(Item);
+
+// Indexes
+ItemSchema.index({ outletId: 1, isAvailable: 1 });
+ItemSchema.index({ categoryId: 1, isAvailable: 1 });
+ItemSchema.index({ variantIds: 1 });
+ItemSchema.index({ addonIds: 1 });
+ItemSchema.index({ taxIds: 1 });

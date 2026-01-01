@@ -46,6 +46,12 @@ export class ItemsController {
   @ApiOperation({ summary: 'Get all items with optional filtering' })
   @ApiQuery({ name: 'outletId', required: true, description: 'Outlet ID' })
   @ApiQuery({ name: 'categoryId', required: false, description: 'Category ID' })
+  @ApiQuery({ 
+    name: 'includeTaxes', 
+    required: false, 
+    type: Boolean,
+    description: 'Include tax details in response (for ordering app display)',
+  })
   @ApiResponse({ 
     status: 200, 
     description: 'Items retrieved successfully',
@@ -54,21 +60,37 @@ export class ItemsController {
   async findAll(
     @Query('outletId') outletId: string,
     @Query('categoryId') categoryId?: string,
+    @Query('includeTaxes') includeTaxes?: string,
   ): Promise<SuccessResponseDto<any[]>> {
-    const items = await this.itemsService.findAll(outletId, categoryId);
+    const shouldIncludeTaxes = includeTaxes === 'true';
+    const items = shouldIncludeTaxes
+      ? await this.itemsService.findAllWithTaxes(outletId, categoryId)
+      : await this.itemsService.findAll(outletId, categoryId);
     return new SuccessResponseDto(items, 'Items retrieved successfully');
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Get item by ID' })
   @ApiParam({ name: 'id', description: 'Item ID' })
+  @ApiQuery({ 
+    name: 'includeTaxes', 
+    required: false, 
+    type: Boolean,
+    description: 'Include tax details in response (for ordering app display)',
+  })
   @ApiResponse({ 
     status: 200, 
     description: 'Item retrieved successfully',
     type: SuccessResponseDto 
   })
-  async findOne(@Param('id') id: string): Promise<SuccessResponseDto<any>> {
-    const item = await this.itemsService.findOne(id);
+  async findOne(
+    @Param('id') id: string,
+    @Query('includeTaxes') includeTaxes?: string,
+  ): Promise<SuccessResponseDto<any>> {
+    const shouldIncludeTaxes = includeTaxes === 'true';
+    const item = shouldIncludeTaxes
+      ? await this.itemsService.findOneWithTaxes(id)
+      : await this.itemsService.findOne(id);
     return new SuccessResponseDto(item, 'Item retrieved successfully');
   }
 

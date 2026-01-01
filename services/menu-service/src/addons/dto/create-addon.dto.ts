@@ -81,5 +81,17 @@ export class CreateAddonDto {
   @ValidateNested({ each: true })
   @Type(() => AddonItemDto)
   items?: AddonItemDto[];
+
+  // Variant support at addon level
+  @ApiProperty({
+    required: false,
+    type: [String],
+    default: [],
+    description: 'Variant IDs applicable to all items in this addon',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  applicableVariantIds?: string[];
 }
 
