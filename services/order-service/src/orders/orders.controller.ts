@@ -12,6 +12,10 @@ import {
 import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
+import { CreateOrderWithKotDto } from './dto/create-order-with-kot.dto';
+import { AddItemsToOrderDto } from './dto/add-items-to-order.dto';
+import { GenerateBillDto } from './dto/generate-bill.dto';
+import { SettleOrderDto } from './dto/settle-order.dto';
 import { SuccessResponseDto } from './dto/success-response.dto';
 
 @Controller('orders')
@@ -25,6 +29,60 @@ export class OrdersController {
   ): Promise<SuccessResponseDto<any>> {
     const order = await this.ordersService.create(createOrderDto);
     return new SuccessResponseDto(order, 'Order created successfully');
+  }
+
+  @Post('create-with-kot')
+  @HttpCode(HttpStatus.CREATED)
+  async createOrderWithKOT(
+    @Body() createOrderWithKotDto: CreateOrderWithKotDto,
+  ): Promise<SuccessResponseDto<any>> {
+    const result = await this.ordersService.createOrderWithKOT(
+      createOrderWithKotDto,
+    );
+    return new SuccessResponseDto(
+      result,
+      'Order created and KOT generated successfully',
+    );
+  }
+
+  @Post('add-items')
+  @HttpCode(HttpStatus.OK)
+  async addItemsToOrder(
+    @Body() addItemsToOrderDto: AddItemsToOrderDto,
+  ): Promise<SuccessResponseDto<any>> {
+    const result = await this.ordersService.addItemsToOrder(
+      addItemsToOrderDto,
+    );
+    return new SuccessResponseDto(
+      result,
+      'Items added to order and delta KOT generated successfully',
+    );
+  }
+
+  @Post('generate-bill')
+  @HttpCode(HttpStatus.OK)
+  async generateBill(
+    @Body() generateBillDto: GenerateBillDto,
+  ): Promise<SuccessResponseDto<any>> {
+    const bill = await this.ordersService.generateBill(generateBillDto);
+    return new SuccessResponseDto(
+      bill,
+      bill.hasUnprintedItems
+        ? 'Bill generated with warnings'
+        : 'Bill generated successfully',
+    );
+  }
+
+  @Post('settle')
+  @HttpCode(HttpStatus.OK)
+  async settleOrder(
+    @Body() settleOrderDto: SettleOrderDto,
+  ): Promise<SuccessResponseDto<any>> {
+    const result = await this.ordersService.settleOrder(settleOrderDto);
+    return new SuccessResponseDto(
+      result,
+      'Order settled successfully',
+    );
   }
 
   @Get()

@@ -38,9 +38,21 @@ export class CreateOrderDto {
   @IsString()
   orderId: string;
 
+  @IsString()
   @IsOptional()
-  @IsNumber()
-  tableNumber?: number;
+  restaurantId?: string;
+
+  @IsString()
+  @IsOptional()
+  tableId?: string; // Reference to restaurant-service table module (ObjectId as string)
+
+  @IsString()
+  @IsOptional()
+  waiterId?: string;
+
+  @IsString()
+  @IsOptional()
+  customerPhone?: string;
 
   @ValidateNested()
   @Type(() => CustomerDto)

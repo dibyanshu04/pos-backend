@@ -1,0 +1,73 @@
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { Document, Types } from 'mongoose';
+
+export type OrderItemDocument = OrderItem & Document;
+
+@Schema({ timestamps: true })
+export class OrderItem {
+  // Order Reference (One-to-Many: Order -> OrderItems)
+  @Prop({
+    type: Types.ObjectId,
+    ref: 'Order',
+    required: true,
+    index: true,
+  })
+  orderId: Types.ObjectId;
+
+  // Menu Item References
+  @Prop({ type: String, required: true, index: true })
+  menuItemId: string; // Reference to menu-service Item
+
+  @Prop({ type: String, index: true })
+  variantId?: string; // Reference to menu-service Variant (optional)
+
+  // Item Information (snapshot at time of order)
+  @Prop({ type: String, required: true })
+  itemName: string; // Snapshot of item name at order time
+
+  @Prop({ type: String })
+  variantName?: string; // Snapshot of variant name (e.g., "Large", "Medium")
+
+  // Pricing
+  @Prop({ type: Number, required: true, min: 0 })
+  price: number; // Unit price at time of order
+
+  @Prop({ type: Number, required: true, min: 1 })
+  quantity: number; // Quantity ordered
+
+  @Prop({ type: Number, required: true, min: 0 })
+  totalPrice: number; // price * quantity
+
+  // Special Instructions
+  @Prop({ type: String })
+  specialInstructions?: string; // Customer special instructions for this item
+
+  // Item Status
+  @Prop({
+    type: String,
+    enum: ['PENDING', 'PRINTED', 'CANCELLED'],
+    default: 'PENDING',
+    required: true,
+    index: true,
+  })
+  itemStatus: 'PENDING' | 'PRINTED' | 'CANCELLED';
+
+  // KOT Reference (which KOT this item was printed in)
+  @Prop({ type: Types.ObjectId, ref: 'KOT', index: true })
+  kotId?: Types.ObjectId; // Reference to KOT when item is printed
+
+  // Additional metadata
+  @Prop({ type: Date })
+  printedAt?: Date; // Timestamp when item was printed in KOT
+
+  @Prop({ type: Date })
+  cancelledAt?: Date; // Timestamp when item was cancelled
+}
+
+export const OrderItemSchema = SchemaFactory.createForClass(OrderItem);
+
+// Indexes for better query performance
+OrderItemSchema.index({ orderId: 1, itemStatus: 1 });
+OrderItemSchema.index({ orderId: 1, kotId: 1 });
+OrderItemSchema.index({ menuItemId: 1 });
+OrderItemSchema.index({ kotId: 1 });
