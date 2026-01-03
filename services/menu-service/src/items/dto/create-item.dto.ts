@@ -28,6 +28,17 @@ class VariationDto {
   isDefault?: boolean;
 }
 
+class VariantPricingDto {
+  @ApiProperty({ description: 'Variant ID', example: 'variantId1' })
+  @IsString()
+  variant: string;
+
+  @ApiProperty({ description: 'Price for this variant', example: 100 })
+  @IsNumber()
+  @Min(0)
+  price: number;
+}
+
 export class CreateItemDto {
   @ApiProperty()
   @IsString()
@@ -124,9 +135,13 @@ export class CreateItemDto {
 
   @ApiProperty({
     required: false,
-    description: 'Override variant prices for this item. Format: { variantId: { variantValueName: priceOverride } }',
-    example: { 'variant_id_123': { 'Large': 50 } },
+    type: [VariantPricingDto],
+    description: 'Variant pricing array. Each entry contains a variant ID and its price for this item.',
+    example: [{ variant: 'variantId1', price: 100 }, { variant: 'variantId2', price: 50 }],
   })
   @IsOptional()
-  variantPricing?: Record<string, Record<string, number>>;
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => VariantPricingDto)
+  variantPricing?: VariantPricingDto[];
 }

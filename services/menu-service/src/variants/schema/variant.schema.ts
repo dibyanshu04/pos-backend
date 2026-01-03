@@ -1,38 +1,18 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document } from 'mongoose';
+import { Document, Types } from 'mongoose';
 
-export type VariantDocument = Variant & Document;
+@Schema({ _id: false })
+export class ItemVariantPricing {
+  @Prop({ required: true, type: Types.ObjectId, ref: 'Variant' })
+  variant: string; // Reference to Variant ID
 
-// Variant Value (e.g., Small, Medium, Large)
-@Schema({ _id: true })
-export class VariantValue {
-  @Prop({ required: true, trim: true })
-  name: string; // e.g., "Small", "Medium", "Large"
-
-  @Prop({ trim: true })
-  displayName?: string; // Optional display name
-
-  @Prop({ default: 0, min: 0 })
-  price: number; // Price difference for this variant value
-
-  @Prop({ default: 0, min: 0 })
-  basePrice?: number; // Base price if this is default variant
-
-  @Prop({ default: false })
-  isDefault: boolean; // Default variant value
-
-  @Prop({
-    type: String,
-    enum: ['Active', 'Inactive'],
-    default: 'Active',
-  })
-  status: string;
-
-  @Prop({ default: 0, index: true })
-  rank: number; // Display order
+  @Prop({ required: true, min: 0 })
+  price: number; // Price for this variant on this item
 }
 
-export const VariantValueSchema = SchemaFactory.createForClass(VariantValue);
+export const ItemVariantPricingSchema =
+  SchemaFactory.createForClass(ItemVariantPricing);
+export type VariantDocument = Variant & Document;
 
 @Schema({ timestamps: true })
 export class Variant {
@@ -54,18 +34,6 @@ export class Variant {
 
   @Prop({ required: true, index: true })
   restaurantId: string;
-
-  @Prop({ type: [VariantValueSchema], default: [] })
-  values: VariantValue[]; // Variant values (Small, Medium, Large, etc.)
-
-  @Prop({ default: false })
-  isRequired: boolean; // Is variant selection required
-
-  @Prop({ default: 1, min: 1 })
-  minSelection: number; // Minimum selections allowed
-
-  @Prop({ default: 1, min: 1 })
-  maxSelection: number; // Maximum selections allowed
 
   @Prop({ default: 0, index: true })
   rank: number; // Display order

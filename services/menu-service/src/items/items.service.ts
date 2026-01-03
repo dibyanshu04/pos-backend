@@ -23,25 +23,7 @@ export class ItemsService {
       }
     }
 
-    // Convert variantPricing object to array format if provided
-    let variantPricingArray : any = [];
-    if (createItemDto.variantPricing) {
-      variantPricingArray = Object.entries(createItemDto.variantPricing).flatMap(
-        ([variantId, valuePricing]) =>
-          Object.entries(valuePricing).map(([variantValueName, priceOverride]) => ({
-            variantId,
-            variantValueName,
-            priceOverride,
-          })),
-      );
-    }
-
-    const itemData = {
-      ...createItemDto,
-      variantPricing: variantPricingArray.length > 0 ? variantPricingArray : undefined,
-    };
-
-    const createdItem = new this.itemModel(itemData);
+    const createdItem = new this.itemModel(createItemDto);
     return createdItem.save();
   }
 
@@ -57,7 +39,8 @@ export class ItemsService {
   async findOne(id: string): Promise<Item> {
     const item = await this.itemModel
       .findById(id)
-      .populate('variantIds', 'name values department')
+      .populate('variants', 'name values department')
+      .populate('variantPricing.variant', 'name values department')
       .populate('addonIds', 'departmentName items applicableVariantIds')
       .exec();
     if (!item) {
@@ -136,22 +119,8 @@ export class ItemsService {
   }
 
   async update(id: string, updateItemDto: UpdateItemDto): Promise<Item> {
-    // Convert variantPricing object to array format if provided
-    let updateData: any = { ...updateItemDto };
-    if (updateItemDto.variantPricing) {
-      const variantPricingArray = Object.entries(updateItemDto.variantPricing).flatMap(
-        ([variantId, valuePricing]) =>
-          Object.entries(valuePricing).map(([variantValueName, priceOverride]) => ({
-            variantId,
-            variantValueName,
-            priceOverride,
-          })),
-      );
-      updateData.variantPricing = variantPricingArray;
-    }
-
     const updatedItem = await this.itemModel
-      .findByIdAndUpdate(id, updateData, { new: true })
+      .findByIdAndUpdate(id, updateItemDto, { new: true })
       .exec();
 
     if (!updatedItem) {

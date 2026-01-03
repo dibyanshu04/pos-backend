@@ -1,22 +1,8 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Schema as MongooseSchema, Types } from 'mongoose';
+import { ItemVariantPricing, ItemVariantPricingSchema } from 'src/variants/schema/variant.schema';
 
 export type ItemDocument = Item & Document;
-
-// Item-specific variant pricing override
-@Schema({ _id: false })
-export class ItemVariantPricing {
-  @Prop({ required: true, type: Types.ObjectId, ref: 'Variant' })
-  variantId: string; // Reference to Variant
-
-  @Prop({ required: true, type: String })
-  variantValueName: string; // Variant value name (e.g., "Large")
-
-  @Prop({ default: 0, min: 0 })
-  priceOverride?: number; // Override price for this variant on this item
-}
-
-export const ItemVariantPricingSchema = SchemaFactory.createForClass(ItemVariantPricing);
 
 @Schema({ timestamps: true })
 export class Item {
@@ -60,11 +46,11 @@ export class Item {
 
   // Variant References (reference to Variant module)
   @Prop({ type: [Types.ObjectId], ref: 'Variant', default: [] })
-  variantIds?: string[]; // Array of Variant IDs applicable to this item
+  variants?: string[];
 
-  // Item-specific variant pricing overrides
+  // Variant pricing - stores variant IDs with their prices
   @Prop({ type: [ItemVariantPricingSchema], default: [] })
-  variantPricing?: ItemVariantPricing[]; // Override variant prices for this item
+  variantPricing?: ItemVariantPricing[]; 
 
   // Addon References (reference to Addon module)
   @Prop({ type: [Types.ObjectId], ref: 'Addon', default: [] })
@@ -129,6 +115,3 @@ export const ItemSchema = SchemaFactory.createForClass(Item);
 // Indexes
 ItemSchema.index({ outletId: 1, isAvailable: 1 });
 ItemSchema.index({ categoryId: 1, isAvailable: 1 });
-ItemSchema.index({ variantIds: 1 });
-ItemSchema.index({ addonIds: 1 });
-ItemSchema.index({ taxIds: 1 });
