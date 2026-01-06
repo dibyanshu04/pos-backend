@@ -24,7 +24,20 @@ export class ItemsService {
     }
 
     const createdItem = new this.itemModel(createItemDto);
-    return createdItem.save();
+    await createdItem.save();
+    
+    // Populate addons and variants before returning
+    const populatedItem = await this.itemModel
+      .findById(createdItem._id)
+      .populate('variants', 'name values department isRequired minSelection maxSelection rank')
+      .populate('addonIds', 'departmentName onlineDisplayName items addonMin addonMax addonItemSelection maxSelectionPerAddonAllowed showInOnline allowOpenQuantity rank status applicableVariantIds')
+      .exec();
+    
+    if (!populatedItem) {
+      throw new NotFoundException('Failed to retrieve created item');
+    }
+    
+    return populatedItem;
   }
 
   async findAll(outletId: string, categoryId?: string): Promise<Item[]> {
@@ -33,15 +46,20 @@ export class ItemsService {
       filter.categoryId = categoryId;
     }
 
-    return this.itemModel.find(filter).sort({ displayOrder: 1 }).exec();
+    return this.itemModel
+      .find(filter)
+      .sort({ displayOrder: 1 })
+      .populate('variants', 'name values department isRequired minSelection maxSelection rank')
+      .populate('addonIds', 'departmentName onlineDisplayName items addonMin addonMax addonItemSelection maxSelectionPerAddonAllowed showInOnline allowOpenQuantity rank status applicableVariantIds')
+      .exec();
   }
 
   async findOne(id: string): Promise<Item> {
     const item = await this.itemModel
       .findById(id)
-      .populate('variants', 'name values department')
+      .populate('variants', 'name values department isRequired minSelection maxSelection rank')
       .populate('variantPricing.variant', 'name values department')
-      .populate('addonIds', 'departmentName items applicableVariantIds')
+      .populate('addonIds', 'departmentName onlineDisplayName items addonMin addonMax addonItemSelection maxSelectionPerAddonAllowed showInOnline allowOpenQuantity rank status applicableVariantIds')
       .exec();
     if (!item) {
       throw new NotFoundException('Item not found');
@@ -50,7 +68,11 @@ export class ItemsService {
   }
 
   async findOneWithTaxes(id: string): Promise<any> {
-    const item = await this.itemModel.findById(id).exec();
+    const item = await this.itemModel
+      .findById(id)
+      .populate('variants', 'name values department isRequired minSelection maxSelection rank')
+      .populate('addonIds', 'departmentName onlineDisplayName items addonMin addonMax addonItemSelection maxSelectionPerAddonAllowed showInOnline allowOpenQuantity rank status applicableVariantIds')
+      .exec();
     if (!item) {
       throw new NotFoundException('Item not found');
     }
@@ -85,7 +107,12 @@ export class ItemsService {
       filter.categoryId = categoryId;
     }
 
-    const items = await this.itemModel.find(filter).sort({ displayOrder: 1 }).exec();
+    const items = await this.itemModel
+      .find(filter)
+      .sort({ displayOrder: 1 })
+      .populate('variants', 'name values department isRequired minSelection maxSelection rank')
+      .populate('addonIds', 'departmentName onlineDisplayName items addonMin addonMax addonItemSelection maxSelectionPerAddonAllowed showInOnline allowOpenQuantity rank status applicableVariantIds')
+      .exec();
     
     // Get all unique tax IDs
     const allTaxIds = [...new Set(items.flatMap((item) => item.taxIds || []))];
@@ -121,6 +148,8 @@ export class ItemsService {
   async update(id: string, updateItemDto: UpdateItemDto): Promise<Item> {
     const updatedItem = await this.itemModel
       .findByIdAndUpdate(id, updateItemDto, { new: true })
+      .populate('variants', 'name values department isRequired minSelection maxSelection rank')
+      .populate('addonIds', 'departmentName onlineDisplayName items addonMin addonMax addonItemSelection maxSelectionPerAddonAllowed showInOnline allowOpenQuantity rank status applicableVariantIds')
       .exec();
 
     if (!updatedItem) {
@@ -141,6 +170,8 @@ export class ItemsService {
     return this.itemModel
       .find({ categoryId, isAvailable: true })
       .sort({ displayOrder: 1 })
+      .populate('variants', 'name values department isRequired minSelection maxSelection rank')
+      .populate('addonIds', 'departmentName onlineDisplayName items addonMin addonMax addonItemSelection maxSelectionPerAddonAllowed showInOnline allowOpenQuantity rank status applicableVariantIds')
       .exec();
   }
 
@@ -148,6 +179,8 @@ export class ItemsService {
     return this.itemModel
       .find({ outletId, isAvailable: true })
       .sort({ displayOrder: 1 })
+      .populate('variants', 'name values department isRequired minSelection maxSelection rank')
+      .populate('addonIds', 'departmentName onlineDisplayName items addonMin addonMax addonItemSelection maxSelectionPerAddonAllowed showInOnline allowOpenQuantity rank status applicableVariantIds')
       .exec();
   }
 
@@ -157,6 +190,8 @@ export class ItemsService {
   ): Promise<Item> {
     const item = await this.itemModel
       .findByIdAndUpdate(itemId, { isAvailable }, { new: true })
+      .populate('variants', 'name values department isRequired minSelection maxSelection rank')
+      .populate('addonIds', 'departmentName onlineDisplayName items addonMin addonMax addonItemSelection maxSelectionPerAddonAllowed showInOnline allowOpenQuantity rank status applicableVariantIds')
       .exec();
 
     if (!item) {
@@ -187,6 +222,8 @@ export class ItemsService {
 
     const item = await this.itemModel
       .findByIdAndUpdate(itemId, updateQuery, { new: true })
+      .populate('variants', 'name values department isRequired minSelection maxSelection rank')
+      .populate('addonIds', 'departmentName onlineDisplayName items addonMin addonMax addonItemSelection maxSelectionPerAddonAllowed showInOnline allowOpenQuantity rank status applicableVariantIds')
       .exec();
 
     if (!item) {

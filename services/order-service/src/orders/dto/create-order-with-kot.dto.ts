@@ -34,6 +34,10 @@ export class CreateOrderWithKotDto {
 
   @IsString()
   @IsNotEmpty()
+  outletId: string; // Outlet ID for POS session lookup
+
+  @IsString()
+  @IsNotEmpty()
   tableId: string; // Will be converted to ObjectId
 
   @IsString()

@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document } from 'mongoose';
+import { Document, Types } from 'mongoose';
 
 export type CategoryDocument = Category & Document;
 
@@ -61,6 +61,10 @@ export class Category {
 
   @Prop({ default: 0 })
   rank: number;
+
+  // Kitchen mapping (optional) - Category-level kitchen assignment
+  @Prop({ type: Types.ObjectId, ref: 'Kitchen' })
+  kitchenId?: Types.ObjectId;
 }
 
 export const CategorySchema = SchemaFactory.createForClass(Category);

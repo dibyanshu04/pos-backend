@@ -14,6 +14,10 @@ export class Payment {
   })
   orderId: Types.ObjectId;
 
+  // POS Session Reference
+  @Prop({ type: Types.ObjectId, ref: 'PosSession', index: true })
+  posSessionId?: Types.ObjectId; // Reference to POS session
+
   // Restaurant Reference
   @Prop({ type: String, required: true, index: true })
   restaurantId: string; // Reference to restaurant-service

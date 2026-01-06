@@ -42,6 +42,10 @@ export class OrderItem {
   @Prop({ type: String })
   specialInstructions?: string; // Customer special instructions for this item
 
+  // Kitchen Assignment (snapshot at time of order)
+  @Prop({ type: Types.ObjectId, ref: 'Kitchen', index: true })
+  kitchenId?: Types.ObjectId; // Kitchen assigned to this item (snapshot)
+
   // Item Status
   @Prop({
     type: String,
@@ -71,3 +75,4 @@ OrderItemSchema.index({ orderId: 1, itemStatus: 1 });
 OrderItemSchema.index({ orderId: 1, kotId: 1 });
 OrderItemSchema.index({ menuItemId: 1 });
 OrderItemSchema.index({ kotId: 1 });
+OrderItemSchema.index({ kitchenId: 1, itemStatus: 1 });

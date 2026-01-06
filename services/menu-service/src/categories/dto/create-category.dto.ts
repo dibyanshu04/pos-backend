@@ -98,4 +98,12 @@ export class CreateCategoryDto {
   @IsOptional()
   @IsNumber()
   rank?: number;
+
+  @ApiProperty({
+    required: false,
+    description: 'Kitchen ID for category-level kitchen mapping',
+  })
+  @IsOptional()
+  @IsString()
+  kitchenId?: string;
 }

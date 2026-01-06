@@ -12,22 +12,6 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
-class VariationDto {
-  @ApiProperty()
-  @IsString()
-  name: string;
-
-  @ApiProperty()
-  @IsNumber()
-  @Min(0)
-  price: number;
-
-  @ApiProperty({ required: false, default: false })
-  @IsOptional()
-  @IsBoolean()
-  isDefault?: boolean;
-}
-
 class VariantPricingDto {
   @ApiProperty({ description: 'Variant ID', example: 'variantId1' })
   @IsString()
@@ -127,11 +111,6 @@ export class CreateItemDto {
   @IsIn(['Dine-In', 'Takeaway', 'Delivery', 'Expose-Online'], { each: true })
   orderType?: ('Dine-In' | 'Takeaway' | 'Delivery' | 'Expose-Online')[];
 
-  @ApiProperty({ required: false, type: [VariationDto], description: 'Legacy inline variations (deprecated - use variantIds instead)' })
-  @IsOptional()
-  @ValidateNested({ each: true })
-  @Type(() => VariationDto)
-  variations?: VariationDto[];
 
   @ApiProperty({
     required: false,

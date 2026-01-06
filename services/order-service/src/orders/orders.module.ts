@@ -2,6 +2,7 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { OrdersController } from './orders.controller';
+import { KotController } from './kot.controller';
 import { OrdersService } from './orders.service';
 import { Order, OrderSchema } from './schemas/order.schema';
 import { OrderItem, OrderItemSchema } from './schemas/order-item.schema';
@@ -11,6 +12,8 @@ import { TableServiceClient } from './services/table-service.client';
 import { MenuServiceClient } from './services/menu-service.client';
 import { TaxConfigService } from './services/tax-config.service';
 import { InventoryServiceClient } from './services/inventory-service.client';
+import { PosSessionModule } from '../pos-session/pos-session.module';
+import { KitchenModule } from '../kitchen/kitchen.module';
 
 @Module({
   imports: [
@@ -20,8 +23,10 @@ import { InventoryServiceClient } from './services/inventory-service.client';
       { name: KOT.name, schema: KotSchema },
       { name: Payment.name, schema: PaymentSchema },
     ]),
+    PosSessionModule,
+    KitchenModule,
   ],
-  controllers: [OrdersController],
+  controllers: [OrdersController, KotController],
   providers: [
     OrdersService,
     TableServiceClient,

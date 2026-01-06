@@ -3,6 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { Category, CategorySchema } from './schema/category.schema';
 import { CategoriesController } from './categories.controller';
 import { CategoriesService } from './categories.service';
+import { KitchenServiceClient } from '../common/clients/kitchen-service.client';
 
 @Module({
   imports: [
@@ -11,7 +12,7 @@ import { CategoriesService } from './categories.service';
     ]),
   ],
   controllers: [CategoriesController],
-  providers: [CategoriesService],
+  providers: [CategoriesService, KitchenServiceClient],
   exports: [CategoriesService],
 })
 export class CategoriesModule {}

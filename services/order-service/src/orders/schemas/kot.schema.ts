@@ -39,13 +39,24 @@ export class KOT {
   @Prop({ type: String, required: true, index: true })
   restaurantId: string; // Reference to restaurant-service
 
+  // Outlet Reference
+  @Prop({ type: String, required: true, index: true })
+  outletId: string; // Reference to outlet
+
+  // Kitchen Reference
+  @Prop({ type: Types.ObjectId, ref: 'Kitchen', required: true, index: true })
+  kitchenId: Types.ObjectId; // Reference to Kitchen
+
+  @Prop({ type: String, required: true })
+  kitchenName: string; // Snapshot of kitchen name
+
   // Table Reference (for dine-in orders)
   @Prop({ type: Types.ObjectId, ref: 'Table', index: true })
   tableId?: Types.ObjectId; // Reference to restaurant-service table module
 
-  // KOT Number (sequential per restaurant/outlet)
+  // KOT Number (sequential per kitchen per day)
   @Prop({ type: String, required: true, index: true })
-  kotNumber: string; // Sequential KOT number (e.g., "KOT-001", "KOT-002")
+  kotNumber: string; // Sequential KOT number per kitchen (e.g., "KOT-001", "KOT-002")
 
   // Items printed in this KOT batch
   @Prop({ type: [KotItemSchema], required: true, default: [] })
@@ -79,7 +90,9 @@ export class KOT {
 export const KotSchema = SchemaFactory.createForClass(KOT);
 
 // Indexes for better query performance
-KotSchema.index({ restaurantId: 1, kotNumber: 1 });
+KotSchema.index({ outletId: 1, kitchenId: 1, kotNumber: 1 });
 KotSchema.index({ restaurantId: 1, orderId: 1 });
 KotSchema.index({ restaurantId: 1, tableId: 1, status: 1 });
 KotSchema.index({ restaurantId: 1, printedAt: -1 });
+KotSchema.index({ kitchenId: 1, status: 1, printedAt: -1 });
+KotSchema.index({ outletId: 1, kitchenId: 1, createdAt: -1 });

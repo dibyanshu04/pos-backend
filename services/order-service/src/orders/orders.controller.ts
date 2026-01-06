@@ -16,6 +16,7 @@ import { CreateOrderWithKotDto } from './dto/create-order-with-kot.dto';
 import { AddItemsToOrderDto } from './dto/add-items-to-order.dto';
 import { GenerateBillDto } from './dto/generate-bill.dto';
 import { SettleOrderDto } from './dto/settle-order.dto';
+import { CreateDraftDto } from './dto/create-draft.dto';
 import { SuccessResponseDto } from './dto/success-response.dto';
 
 @Controller('orders')
@@ -29,6 +30,20 @@ export class OrdersController {
   ): Promise<SuccessResponseDto<any>> {
     const order = await this.ordersService.create(createOrderDto);
     return new SuccessResponseDto(order, 'Order created successfully');
+  }
+
+  @Post('draft')
+  @HttpCode(HttpStatus.CREATED)
+  async createOrUpdateDraft(
+    @Body() createDraftDto: CreateDraftDto,
+  ): Promise<SuccessResponseDto<any>> {
+    const order = await this.ordersService.createOrUpdateDraft(createDraftDto);
+    return new SuccessResponseDto(
+      order,
+      createDraftDto.orderId
+        ? 'Draft order updated successfully'
+        : 'Draft order created successfully',
+    );
   }
 
   @Post('create-with-kot')

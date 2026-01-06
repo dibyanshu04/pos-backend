@@ -16,6 +16,7 @@ import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { CreateOrderWithKotDto } from './dto/create-order-with-kot.dto';
 import { AddItemsToOrderDto } from './dto/add-items-to-order.dto';
+import { CreateDraftDto } from './dto/create-draft.dto';
 import {
   GenerateBillDto,
   BillResponseDto,
@@ -34,6 +35,11 @@ import { TableServiceClient } from './services/table-service.client';
 import { MenuServiceClient } from './services/menu-service.client';
 import { TaxConfigService } from './services/tax-config.service';
 import { InventoryServiceClient } from './services/inventory-service.client';
+import {
+  PosSessionService,
+  PosSessionDocument,
+} from '../pos-session/pos-session.service';
+import { KitchenService } from '../kitchen/kitchen.service';
 
 @Injectable()
 export class OrdersService {
@@ -48,6 +54,8 @@ export class OrdersService {
     private menuServiceClient: MenuServiceClient,
     private taxConfigService: TaxConfigService,
     private inventoryServiceClient: InventoryServiceClient,
+    private posSessionService: PosSessionService,
+    private kitchenService: KitchenService,
   ) {}
 
   async create(createOrderDto: CreateOrderDto): Promise<Order> {
@@ -117,6 +125,245 @@ export class OrdersService {
         throw new NotFoundException('Order with this ID already exists');
       }
       throw error;
+    }
+  }
+
+  /**
+   * Create or Update Draft Order
+   * Saves a draft order without printing KOT or generating bill
+   * If orderId is provided, updates existing draft (only if status is DRAFT)
+   * If orderId is not provided, creates a new draft order
+   */
+  async createOrUpdateDraft(createDraftDto: CreateDraftDto): Promise<Order> {
+    const session = await this.connection.startSession();
+    session.startTransaction();
+
+    try {
+      // Step 0: Check for active POS session (required for order creation)
+      const activeSession = await this.posSessionService.findActiveSession(
+        createDraftDto.outletId,
+      );
+      if (!activeSession) {
+        throw new BadRequestException(
+          'No active POS session found for this outlet. Please open a POS session before creating orders.',
+        );
+      }
+
+      // Step 0.1: Check if POS session has Z-Report (locked)
+      if (activeSession.zReportId) {
+        throw new BadRequestException(
+          'Cannot create or modify orders. Z-Report has been generated for this session. All orders are locked.',
+        );
+      }
+
+      // Step 1: Validate items and get current prices from menu-service
+      const validatedItems =
+        await this.menuServiceClient.validateItemsAndGetPrices(
+          createDraftDto.restaurantId,
+          createDraftDto.items.map((item) => ({
+            menuItemId: item.menuItemId,
+            variantId: item.variantId,
+          })),
+        );
+
+      // Step 2: Collect all unique taxIds from items
+      const allTaxIds = new Set<string>();
+      validatedItems.forEach((item) => {
+        if (item.taxIds && item.taxIds.length > 0) {
+          item.taxIds.forEach((taxId) => allTaxIds.add(taxId));
+        }
+      });
+
+      // Step 3: Fetch tax details for all taxIds
+      const taxDetails =
+        allTaxIds.size > 0
+          ? await this.menuServiceClient.getTaxDetails(
+              createDraftDto.restaurantId,
+              Array.from(allTaxIds),
+            )
+          : [];
+
+      // Create a map for quick tax lookup
+      const taxMap = new Map<string, typeof taxDetails[0]>();
+      taxDetails.forEach((tax) => {
+        taxMap.set(tax._id, tax);
+      });
+
+      // Step 4: Calculate financial summaries and tax per item
+      let subtotal = 0;
+      let totalTax = 0;
+
+      const orderItemsData = createDraftDto.items.map((item, index) => {
+        const validatedItem = validatedItems[index];
+        // Use price from DTO (frontend may have calculated it) or validated price
+        const unitPrice = item.price || validatedItem.price;
+        const itemPriceWithQuantity = unitPrice * item.quantity;
+
+        // Calculate tax for this item based on its taxIds
+        let itemTax = 0;
+        let itemSubtotal = itemPriceWithQuantity;
+
+        if (validatedItem.taxIds && validatedItem.taxIds.length > 0) {
+          // Get tax details for this item's taxes, sorted by priority
+          const itemTaxes = validatedItem.taxIds
+            .map((taxId) => taxMap.get(taxId))
+            .filter((tax) => tax && tax.isActive) // Only active taxes
+            .sort((a, b) => (a?.priority || 0) - (b?.priority || 0)); // Sort by priority
+
+          // Calculate tax for each tax on this item
+          let taxableAmount = itemPriceWithQuantity;
+          itemTaxes.forEach((tax) => {
+            if (!tax) return;
+
+            let taxAmount = 0;
+            if (tax.taxType === 'PERCENTAGE') {
+              if (tax.inclusionType === 'INCLUSIVE') {
+                // Backward calculation: if tax is inclusive, extract tax from price
+                // Formula: tax = (price * rate) / (100 + rate)
+                taxAmount =
+                  (taxableAmount * tax.value) / (100 + tax.value);
+                taxableAmount -= taxAmount; // Adjust taxable amount for next tax (base price reduces)
+                itemSubtotal -= taxAmount; // Reduce subtotal by extracted tax
+              } else {
+                // EXCLUSIVE: tax is added on top
+                taxAmount = (taxableAmount * tax.value) / 100;
+                // Subtotal remains the same for exclusive taxes
+              }
+            } else {
+              // FIXED amount tax
+              taxAmount = tax.value * item.quantity; // Fixed amount per item
+              // For fixed taxes, if inclusive, reduce subtotal
+              if (tax.inclusionType === 'INCLUSIVE') {
+                itemSubtotal -= taxAmount;
+              }
+            }
+
+            itemTax += taxAmount;
+          });
+        }
+
+        subtotal += itemSubtotal;
+        totalTax += itemTax;
+
+        return {
+          menuItemId: item.menuItemId,
+          variantId: item.variantId,
+          itemName: validatedItem.itemName,
+          variantName: validatedItem.variantName,
+          price: unitPrice,
+          quantity: item.quantity,
+          totalPrice: itemSubtotal, // This is the base price (after extracting inclusive taxes)
+          specialInstructions: item.specialInstructions,
+        };
+      });
+
+      // Step 5: Calculate total
+      const discount = 0; // No discount for drafts
+      const tax = totalTax;
+      const total = subtotal + tax - discount;
+
+      // Step 6: Convert tableId to ObjectId
+      const tableId = new Types.ObjectId(createDraftDto.tableId);
+
+      // Step 7: Determine order type
+      const orderType = createDraftDto.orderType || 'DINE_IN';
+
+      // Step 8: Handle create or update logic
+      let savedOrder: OrderDocument;
+
+      if (createDraftDto.orderId) {
+        // UPDATE EXISTING DRAFT
+        const orderId = new Types.ObjectId(createDraftDto.orderId);
+        const existingOrder = await this.orderModel
+          .findById(orderId)
+          .session(session)
+          .exec();
+
+        if (!existingOrder) {
+          throw new NotFoundException(
+            `Order with ID ${createDraftDto.orderId} not found`,
+          );
+        }
+
+        // Security Check: Ensure order is in DRAFT status
+        if (existingOrder.status !== 'DRAFT') {
+          throw new BadRequestException(
+            `Cannot modify order with status ${existingOrder.status}. Only DRAFT orders can be modified via this endpoint.`,
+          );
+        }
+
+        // Update order fields
+        existingOrder.tableId = tableId;
+        existingOrder.waiterId = createDraftDto.waiterId;
+        existingOrder.customerId = createDraftDto.customerId;
+        existingOrder.customerPhone = createDraftDto.customerPhone;
+        existingOrder.subtotal = subtotal;
+        existingOrder.tax = tax;
+        existingOrder.discount = discount;
+        existingOrder.total = total;
+        existingOrder.notes = createDraftDto.notes;
+        existingOrder.orderType = orderType;
+
+        savedOrder = await existingOrder.save({ session });
+
+        // Delete existing order items and create new ones
+        await this.orderItemModel.deleteMany(
+          { orderId: savedOrder._id },
+          { session },
+        );
+      } else {
+        // CREATE NEW DRAFT
+        const orderData = {
+          restaurantId: createDraftDto.restaurantId,
+          tableId,
+          waiterId: createDraftDto.waiterId,
+          customerId: createDraftDto.customerId,
+          customerPhone: createDraftDto.customerPhone,
+          posSessionId: activeSession._id, // Attach POS session
+          status: 'DRAFT' as const,
+          orderType,
+          subtotal,
+          tax,
+          discount,
+          total,
+          notes: createDraftDto.notes,
+        };
+
+        const newOrder = new this.orderModel(orderData);
+        savedOrder = await newOrder.save({ session });
+      }
+
+      // Step 9: Create OrderItems
+      const orderItems = orderItemsData.map((itemData) => ({
+        orderId: savedOrder._id,
+        menuItemId: itemData.menuItemId,
+        variantId: itemData.variantId,
+        itemName: itemData.itemName,
+        variantName: itemData.variantName,
+        price: itemData.price,
+        quantity: itemData.quantity,
+        totalPrice: itemData.totalPrice,
+        specialInstructions: itemData.specialInstructions,
+        itemStatus: 'PENDING' as const, // Draft items are always PENDING
+      }));
+
+      await this.orderItemModel.insertMany(orderItems, { session });
+
+      // Step 9: Commit transaction
+      await session.commitTransaction(); 
+
+      // Step 11: Populate order items for response
+      const populatedOrder : any = await this.orderModel
+        .findById(savedOrder._id)
+        .exec();
+
+      return populatedOrder;
+    } catch (error) {
+      // Rollback transaction on any error
+      await session.abortTransaction();
+      throw error;
+    } finally {
+      session.endSession();
     }
   }
 
@@ -200,16 +447,28 @@ export class OrdersService {
   }
 
   /**
-   * Generate next KOT number for a restaurant
+   * Generate next KOT number for a kitchen (per day, per kitchen)
    * Format: KOT-001, KOT-002, etc.
+   * KOT numbers reset daily per kitchen
    */
   private async generateKotNumber(
-    restaurantId: string,
+    outletId: string,
+    kitchenId: Types.ObjectId,
     session?: ClientSession,
   ): Promise<string> {
-    // Find the latest KOT for this restaurant
+    // Get start of today
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    // Find the latest KOT for this kitchen today
     const latestKot = await this.kotModel
-      .findOne({ restaurantId })
+      .findOne({
+        outletId,
+        kitchenId,
+        createdAt: { $gte: today, $lt: tomorrow },
+      })
       .sort({ kotNumber: -1 })
       .session(session || null)
       .exec();
@@ -237,6 +496,23 @@ export class OrdersService {
     session.startTransaction();
 
     try {
+      // Step 0: Check for active POS session (required for order creation)
+      const activeSession = await this.posSessionService.findActiveSession(
+        createOrderDto.outletId,
+      );
+      if (!activeSession) {
+        throw new BadRequestException(
+          'No active POS session found for this outlet. Please open a POS session before creating orders.',
+        );
+      }
+
+      // Step 0.1: Check if POS session has Z-Report (locked)
+      if (activeSession.zReportId) {
+        throw new BadRequestException(
+          'Cannot create orders. Z-Report has been generated for this session. All orders are locked.',
+        );
+      }
+
       // Step 1: Validation - Check if table is VACANT
       const isVacant = await this.tableServiceClient.isTableVacant(
         createOrderDto.tableId,
@@ -257,23 +533,55 @@ export class OrdersService {
           })),
         );
 
+      // Step 2.1: Get default kitchen for outlet
+      const defaultKitchen = await this.kitchenService.getDefaultKitchenOrFail(
+        createOrderDto.outletId,
+      );
+
+      // Step 2.2: Resolve kitchen for each item
+      // If menu item has kitchenId, use it; otherwise use default kitchen
+      const orderItemsData = await Promise.all(
+        createOrderDto.items.map(async (item, index) => {
+          const validatedItem = validatedItems[index];
+          const totalPrice = validatedItem.price * item.quantity;
+
+          // Resolve kitchen: use item's kitchenId if available, else default
+          let kitchenId: Types.ObjectId;
+          let kitchenName: string;
+
+          if (validatedItem.kitchenId) {
+            // Validate kitchen exists and is active
+            const kitchen = await this.kitchenService.validateKitchen(
+              validatedItem.kitchenId,
+              createOrderDto.outletId,
+            );
+            kitchenId = kitchen._id;
+            kitchenName = kitchen.name;
+          } else {
+            // Use default kitchen
+            kitchenId = defaultKitchen._id;
+            kitchenName = defaultKitchen.name;
+          }
+
+          return {
+            menuItemId: item.menuItemId,
+            variantId: item.variantId,
+            itemName: validatedItem.itemName,
+            variantName: validatedItem.variantName,
+            price: validatedItem.price,
+            quantity: item.quantity,
+            totalPrice,
+            specialInstructions: item.specialInstructions,
+            kitchenId,
+            kitchenName,
+          };
+        }),
+      );
+
       // Step 3: Calculate financial summaries
       let subtotal = 0;
-      const orderItemsData = createOrderDto.items.map((item, index) => {
-        const validatedItem = validatedItems[index];
-        const totalPrice = validatedItem.price * item.quantity;
-        subtotal += totalPrice;
-
-        return {
-          menuItemId: item.menuItemId,
-          variantId: item.variantId,
-          itemName: validatedItem.itemName,
-          variantName: validatedItem.variantName,
-          price: validatedItem.price,
-          quantity: item.quantity,
-          totalPrice,
-          specialInstructions: item.specialInstructions,
-        };
+      orderItemsData.forEach((itemData) => {
+        subtotal += itemData.totalPrice;
       });
 
       // For now, assume no tax and discount (can be calculated later)
@@ -288,6 +596,7 @@ export class OrdersService {
         tableId,
         waiterId: createOrderDto.waiterId,
         customerPhone: createOrderDto.customerPhone,
+        posSessionId: activeSession._id, // Attach POS session
         status: 'KOT_PRINTED' as const,
         orderType: 'DINE_IN' as const, // Assuming DINE_IN for table orders
         subtotal,
@@ -296,12 +605,13 @@ export class OrdersService {
         total,
         notes: createOrderDto.notes,
         kotPrintedAt: new Date(),
+        kotIds: [], // Will be populated after KOTs are created
       };
 
       const order = new this.orderModel(orderData);
       const savedOrder = await order.save({ session });
 
-      // Step 5: Create OrderItems with status 'PRINTED'
+      // Step 5: Create OrderItems with status 'PRINTED' and kitchenId
       const orderItems = orderItemsData.map((itemData) => ({
         orderId: savedOrder._id,
         menuItemId: itemData.menuItemId,
@@ -312,6 +622,7 @@ export class OrdersService {
         quantity: itemData.quantity,
         totalPrice: itemData.totalPrice,
         specialInstructions: itemData.specialInstructions,
+        kitchenId: itemData.kitchenId, // Store kitchen assignment
         itemStatus: 'PRINTED' as const,
         printedAt: new Date(),
       }));
@@ -321,42 +632,81 @@ export class OrdersService {
         { session },
       );
 
-      // Step 6: Generate KOT number
-      const kotNumber = await this.generateKotNumber(
-        createOrderDto.restaurantId,
-        session,
-      );
+      // Step 6: Group items by kitchen
+      const itemsByKitchen = new Map<
+        string,
+        { kitchenId: Types.ObjectId; kitchenName: string; items: any[] }
+      >();
 
-      // Step 7: Create KOT record
-      const kotItems = savedOrderItems.map((orderItem) => ({
-        orderItemId: orderItem._id,
-        itemName: orderItem.itemName,
-        variantName: orderItem.variantName,
-        quantity: orderItem.quantity,
-        specialInstructions: orderItem.specialInstructions,
-      }));
+      savedOrderItems.forEach((orderItem) => {
+        const kitchenKey = orderItem.kitchenId.toString();
+        if (!itemsByKitchen.has(kitchenKey)) {
+          // Find kitchen info from orderItemsData
+          const itemData = orderItemsData.find(
+            (d) => d.kitchenId.toString() === kitchenKey,
+          );
+          itemsByKitchen.set(kitchenKey, {
+            kitchenId: orderItem.kitchenId,
+            kitchenName: itemData?.kitchenName || 'Unknown Kitchen',
+            items: [],
+          });
+        }
+        itemsByKitchen.get(kitchenKey)!.items.push(orderItem);
+      });
 
-      const kotData = {
-        orderId: savedOrder._id,
-        restaurantId: createOrderDto.restaurantId,
-        tableId,
-        kotNumber,
-        items: kotItems,
-        status: 'PRINTED' as const,
-        printedAt: new Date(),
-        printedBy: createOrderDto.waiterId,
-        notes: createOrderDto.notes,
-      };
+      // Step 7: Generate KOTs per kitchen
+      const savedKots: KotDocument[] = [];
+      const kotIds: Types.ObjectId[] = [];
 
-      const kot = new this.kotModel(kotData);
-      const savedKot = await kot.save({ session });
+      for (const [kitchenKey, kitchenGroup] of itemsByKitchen.entries()) {
+        // Generate KOT number for this kitchen
+        const kotNumber = await this.generateKotNumber(
+          createOrderDto.outletId,
+          kitchenGroup.kitchenId,
+          session,
+        );
 
-      // Step 8: Update OrderItems with kotId
-      await this.orderItemModel.updateMany(
-        { _id: { $in: savedOrderItems.map((item) => item._id) } },
-        { $set: { kotId: savedKot._id } },
-        { session },
-      );
+        // Create KOT items for this kitchen
+        const kotItems = kitchenGroup.items.map((orderItem) => ({
+          orderItemId: orderItem._id,
+          itemName: orderItem.itemName,
+          variantName: orderItem.variantName,
+          quantity: orderItem.quantity,
+          specialInstructions: orderItem.specialInstructions,
+        }));
+
+        // Create KOT record
+        const kotData = {
+          orderId: savedOrder._id,
+          restaurantId: createOrderDto.restaurantId,
+          outletId: createOrderDto.outletId,
+          kitchenId: kitchenGroup.kitchenId,
+          kitchenName: kitchenGroup.kitchenName,
+          tableId,
+          kotNumber,
+          items: kotItems,
+          status: 'PRINTED' as const,
+          printedAt: new Date(),
+          printedBy: createOrderDto.waiterId,
+          notes: createOrderDto.notes,
+        };
+
+        const kot = new this.kotModel(kotData);
+        const savedKot = await kot.save({ session });
+        savedKots.push(savedKot);
+        kotIds.push(savedKot._id);
+
+        // Update OrderItems with kotId for this kitchen
+        await this.orderItemModel.updateMany(
+          { _id: { $in: kitchenGroup.items.map((item) => item._id) } },
+          { $set: { kotId: savedKot._id } },
+          { session },
+        );
+      }
+
+      // Step 8: Update Order with kotIds
+      savedOrder.kotIds = kotIds;
+      await savedOrder.save({ session });
 
       // Step 9: Commit transaction
       await session.commitTransaction();
@@ -365,12 +715,15 @@ export class OrdersService {
       // This is done after transaction commit to avoid blocking
       await this.tableServiceClient.markTableOccupied(createOrderDto.tableId);
 
-      // Step 11: Format response
-      const kotResponse: KotResponseDto = {
+      // Step 11: Format response (return first KOT for backward compatibility, but include all KOTs)
+      const kotResponses: KotResponseDto[] = savedKots.map((savedKot) => ({
         kotId: savedKot._id.toString(),
         kotNumber: savedKot.kotNumber,
         orderId: savedOrder._id.toString(),
         restaurantId: savedKot.restaurantId,
+        outletId: savedKot.outletId,
+        kitchenId: savedKot.kitchenId.toString(),
+        kitchenName: savedKot.kitchenName,
         tableId: savedKot.tableId?.toString(),
         items: savedKot.items.map((item) => ({
           orderItemId: item.orderItemId.toString(),
@@ -383,11 +736,12 @@ export class OrdersService {
         printedAt: savedKot.printedAt,
         printedBy: savedKot.printedBy,
         notes: savedKot.notes,
-      };
+      }));
 
       return {
         orderId: savedOrder._id.toString(),
-        kot: kotResponse,
+        kot: kotResponses[0], // First KOT for backward compatibility
+        kots: kotResponses, // All KOTs
       };
     } catch (error) {
       // Rollback transaction on any error
@@ -405,7 +759,7 @@ export class OrdersService {
    */
   async addItemsToOrder(
     addItemsDto: AddItemsToOrderDto,
-  ): Promise<{ orderId: string; kot: KotResponseDto }> {
+  ): Promise<{ orderId: string; kot: KotResponseDto; kots?: KotResponseDto[] }> {
     const session = await this.connection.startSession();
     session.startTransaction();
 
@@ -433,6 +787,35 @@ export class OrdersService {
         );
       }
 
+      // Step 2.1: Get outletId from POS session
+      // We need outletId to resolve kitchens, but order doesn't store it
+      // Get it from the first KOT if available, or from POS session
+      let outletId: string;
+      if (existingOrder.kotIds && existingOrder.kotIds.length > 0) {
+        // Get outletId from first KOT
+        const firstKot = await this.kotModel
+          .findById(existingOrder.kotIds[0])
+          .session(session)
+          .exec();
+        if (firstKot) {
+          outletId = firstKot.outletId;
+        } else {
+          throw new BadRequestException(
+            'Cannot determine outlet. KOT not found.',
+          );
+        }
+      } else if (existingOrder.posSessionId) {
+        // Fallback: Get from POS session (would need to add method to service)
+        // For now, throw error - outletId should be available from KOTs
+        throw new BadRequestException(
+          'Cannot determine outlet. Order has no KOTs. Please contact support.',
+        );
+      } else {
+        throw new BadRequestException(
+          'Order does not have a POS session or KOTs. Cannot determine outlet.',
+        );
+      }
+
       // Step 3: Validation - Validate new items and get current prices
       const validatedItems =
         await this.menuServiceClient.validateItemsAndGetPrices(
@@ -443,30 +826,101 @@ export class OrdersService {
           })),
         );
 
+      // Step 3.1: Get default kitchen for outlet
+      const defaultKitchen = await this.kitchenService.getDefaultKitchenOrFail(
+        outletId,
+      );
+
+      // Step 3.2: Resolve kitchen for each new item
+      // Priority: item-level kitchen > category-level kitchen > default kitchen
+      const newOrderItemsData = await Promise.all(
+        addItemsDto.items.map(async (item, index) => {
+          const validatedItem = validatedItems[index];
+          const totalPrice = validatedItem.price * item.quantity;
+
+          // Prepare kitchen resolution input
+          const resolutionInput: EnhancedKitchenResolutionInput = {
+            itemKitchenId: validatedItem.kitchenId || null,
+            itemKitchenName: null, // Will be fetched if item kitchen exists
+            categoryKitchenId: validatedItem.categoryKitchenId || null,
+            categoryKitchenName: validatedItem.categoryKitchenName || null,
+            defaultKitchenId: defaultKitchen._id.toString(),
+            defaultKitchenName: defaultKitchen.name,
+          };
+
+          // Fetch kitchen names if kitchen IDs are provided
+          if (validatedItem.kitchenId) {
+            const itemKitchen = await this.kitchenService.validateKitchen(
+              validatedItem.kitchenId,
+              outletId,
+            );
+            resolutionInput.itemKitchenName = itemKitchen.name;
+          }
+
+          if (validatedItem.categoryKitchenId && !validatedItem.categoryKitchenName) {
+            try {
+              const categoryKitchen = await this.kitchenService.validateKitchen(
+                validatedItem.categoryKitchenId,
+                outletId,
+              );
+              resolutionInput.categoryKitchenName = categoryKitchen.name;
+            } catch (error) {
+              // If category kitchen validation fails, it will fall back to default
+              console.warn(
+                `Category kitchen ${validatedItem.categoryKitchenId} validation failed, will use fallback`,
+              );
+            }
+          }
+
+          // Resolve kitchen using priority order
+          const resolvedKitchen = resolveKitchenForItemEnhanced(resolutionInput);
+
+          // Validate the resolved kitchen exists and is active
+          const kitchen = await this.kitchenService.validateKitchen(
+            resolvedKitchen.kitchenId,
+            outletId,
+          );
+
+          return {
+            orderId: existingOrder._id,
+            menuItemId: item.menuItemId,
+            variantId: item.variantId,
+            itemName: validatedItem.itemName,
+            variantName: validatedItem.variantName,
+            price: validatedItem.price,
+            quantity: item.quantity,
+            totalPrice,
+            specialInstructions: item.specialInstructions,
+            kitchenId: new Types.ObjectId(resolvedKitchen.kitchenId),
+            kitchenName: kitchen.name, // Use validated kitchen name
+            itemStatus: 'PENDING' as const, // New items start as PENDING
+          };
+        }),
+      );
+
       // Step 4: Calculate financial summaries for new items
       let newSubtotal = 0;
-      const newOrderItemsData = addItemsDto.items.map((item, index) => {
-        const validatedItem = validatedItems[index];
-        const totalPrice = validatedItem.price * item.quantity;
-        newSubtotal += totalPrice;
-
-        return {
-          orderId: existingOrder._id,
-          menuItemId: item.menuItemId,
-          variantId: item.variantId,
-          itemName: validatedItem.itemName,
-          variantName: validatedItem.variantName,
-          price: validatedItem.price,
-          quantity: item.quantity,
-          totalPrice,
-          specialInstructions: item.specialInstructions,
-          itemStatus: 'PENDING' as const, // New items start as PENDING
-        };
+      newOrderItemsData.forEach((itemData) => {
+        newSubtotal += itemData.totalPrice;
       });
 
-      // Step 5: Create new OrderItems with status PENDING
+      // Step 5: Create new OrderItems with status PENDING and kitchenId
+      const orderItemsToInsert = newOrderItemsData.map((itemData) => ({
+        orderId: itemData.orderId,
+        menuItemId: itemData.menuItemId,
+        variantId: itemData.variantId,
+        itemName: itemData.itemName,
+        variantName: itemData.variantName,
+        price: itemData.price,
+        quantity: itemData.quantity,
+        totalPrice: itemData.totalPrice,
+        specialInstructions: itemData.specialInstructions,
+        kitchenId: itemData.kitchenId, // Store kitchen assignment
+        itemStatus: itemData.itemStatus,
+      }));
+
       const savedNewOrderItems = await this.orderItemModel.insertMany(
-        newOrderItemsData,
+        orderItemsToInsert,
         { session },
       );
 
@@ -484,6 +938,85 @@ export class OrdersService {
       const updatedDiscount = updatedSubtotal * discountRate;
       const updatedTotal = updatedSubtotal + updatedTax - updatedDiscount;
 
+      // Step 6.1: Group new items by kitchen
+      const itemsByKitchen = new Map<
+        string,
+        { kitchenId: Types.ObjectId; kitchenName: string; items: any[] }
+      >();
+
+      savedNewOrderItems.forEach((orderItem, index) => {
+        const itemData = newOrderItemsData[index];
+        const kitchenKey = itemData.kitchenId.toString();
+        if (!itemsByKitchen.has(kitchenKey)) {
+          itemsByKitchen.set(kitchenKey, {
+            kitchenId: itemData.kitchenId,
+            kitchenName: itemData.kitchenName,
+            items: [],
+          });
+        }
+        itemsByKitchen.get(kitchenKey)!.items.push(orderItem);
+      });
+
+      // Step 7: Generate delta KOTs per kitchen
+      const savedKots: KotDocument[] = [];
+      const newKotIds: Types.ObjectId[] = [];
+
+      for (const [kitchenKey, kitchenGroup] of itemsByKitchen.entries()) {
+        // Generate KOT number for this kitchen
+        const kotNumber = await this.generateKotNumber(
+          outletId,
+          kitchenGroup.kitchenId,
+          session,
+        );
+
+        // Create KOT items for this kitchen
+        const kotItems = kitchenGroup.items.map((orderItem) => ({
+          orderItemId: orderItem._id,
+          itemName: orderItem.itemName,
+          variantName: orderItem.variantName,
+          quantity: orderItem.quantity,
+          specialInstructions: orderItem.specialInstructions,
+        }));
+
+        // Create Delta KOT record
+        const kotData = {
+          orderId: existingOrder._id,
+          restaurantId: existingOrder.restaurantId,
+          outletId,
+          kitchenId: kitchenGroup.kitchenId,
+          kitchenName: kitchenGroup.kitchenName,
+          tableId: existingOrder.tableId,
+          kotNumber,
+          items: kotItems, // Only new items for this kitchen
+          status: 'PRINTED' as const,
+          printedAt: new Date(),
+          printedBy: existingOrder.waiterId,
+        };
+
+        const kot = new this.kotModel(kotData);
+        const savedKot = await kot.save({ session });
+        savedKots.push(savedKot);
+        newKotIds.push(savedKot._id);
+
+        // Update OrderItems with kotId for this kitchen
+        await this.orderItemModel.updateMany(
+          { _id: { $in: kitchenGroup.items.map((item) => item._id) } },
+          {
+            $set: {
+              itemStatus: 'PRINTED',
+              kotId: savedKot._id,
+              printedAt: new Date(),
+            },
+          },
+          { session },
+        );
+      }
+
+      // Step 8: Update Order with new kotIds
+      const updatedKotIds = [
+        ...(existingOrder.kotIds || []),
+        ...newKotIds,
+      ];
       await this.orderModel.findByIdAndUpdate(
         existingOrder._id,
         {
@@ -492,65 +1025,24 @@ export class OrdersService {
             tax: updatedTax,
             discount: updatedDiscount,
             total: updatedTotal,
+            kotIds: updatedKotIds,
           },
         },
         { session, new: true },
       );
 
-      // Step 7: Generate new KOT number (delta KOT)
-      const kotNumber = await this.generateKotNumber(
-        existingOrder.restaurantId,
-        session,
-      );
-
-      // Step 8: Create Delta KOT containing only the newly added items
-      const kotItems = savedNewOrderItems.map((orderItem) => ({
-        orderItemId: orderItem._id,
-        itemName: orderItem.itemName,
-        variantName: orderItem.variantName,
-        quantity: orderItem.quantity,
-        specialInstructions: orderItem.specialInstructions,
-      }));
-
-      const kotData = {
-        orderId: existingOrder._id,
-        restaurantId: existingOrder.restaurantId,
-        tableId: existingOrder.tableId,
-        kotNumber,
-        items: kotItems, // Only new items in this KOT
-        status: 'PRINTED' as const,
-        printedAt: new Date(),
-        printedBy: existingOrder.waiterId,
-      };
-
-      const kot = new this.kotModel(kotData);
-      const savedKot = await kot.save({ session });
-
-      // Step 9: Update new OrderItems to PRINTED status and link to KOT
-      await this.orderItemModel.updateMany(
-        { _id: { $in: savedNewOrderItems.map((item) => item._id) } },
-        {
-          $set: {
-            itemStatus: 'PRINTED',
-            kotId: savedKot._id,
-            printedAt: new Date(),
-          },
-        },
-        { session },
-      );
-
-      // Step 10: Update Order status if needed (if it was DRAFT, keep it; if KOT_PRINTED, keep it)
-      // Order status remains as is since we're just adding items
-
-      // Step 11: Commit transaction
+      // Step 9: Commit transaction
       await session.commitTransaction();
 
-      // Step 12: Format response
-      const kotResponse: KotResponseDto = {
+      // Step 10: Format response
+      const kotResponses: KotResponseDto[] = savedKots.map((savedKot) => ({
         kotId: savedKot._id.toString(),
         kotNumber: savedKot.kotNumber,
         orderId: existingOrder._id.toString(),
         restaurantId: savedKot.restaurantId,
+        outletId: savedKot.outletId,
+        kitchenId: savedKot.kitchenId.toString(),
+        kitchenName: savedKot.kitchenName,
         tableId: savedKot.tableId?.toString(),
         items: savedKot.items.map((item) => ({
           orderItemId: item.orderItemId.toString(),
@@ -563,11 +1055,12 @@ export class OrdersService {
         printedAt: savedKot.printedAt,
         printedBy: savedKot.printedBy,
         notes: savedKot.notes,
-      };
+      }));
 
       return {
         orderId: existingOrder._id.toString(),
-        kot: kotResponse,
+        kot: kotResponses[0], // First KOT for backward compatibility
+        kots: kotResponses, // All delta KOTs
       };
     } catch (error) {
       // Rollback transaction on any error
@@ -829,6 +1322,18 @@ export class OrdersService {
         );
       }
 
+      // Step 3.1: Check if POS session has Z-Report (locked)
+      if (existingOrder.posSessionId) {
+        const posSession = await this.posSessionService.findOne(
+          existingOrder.posSessionId.toString(),
+        );
+        if (posSession?.zReportId) {
+          throw new BadRequestException(
+            'Cannot settle order. Z-Report has been generated for this session. All orders are locked.',
+          );
+        }
+      }
+
       // Step 4: Validation - Ensure paidAmount matches the billTotal
       const billTotal = existingOrder.total;
       const paidAmount = settleOrderDto.amount;
@@ -841,7 +1346,7 @@ export class OrdersService {
       }
 
       // Step 5: Create Payment record
-      const paymentData = {
+      const paymentData: any = {
         orderId: existingOrder._id,
         restaurantId: existingOrder.restaurantId,
         paymentMethod: settleOrderDto.paymentMethod,
@@ -858,6 +1363,11 @@ export class OrdersService {
         completedAt: new Date(),
       };
 
+      // Attach POS session ID if order has one
+      if (existingOrder.posSessionId) {
+        paymentData.posSessionId = existingOrder.posSessionId;
+      }
+
       const payment = new this.paymentModel(paymentData);
       const savedPayment = await payment.save({ session });
 
@@ -873,10 +1383,20 @@ export class OrdersService {
         { session, new: true },
       );
 
-      // Step 7: Commit transaction
+      // Step 7: Update POS Session totals if session exists
+      if (existingOrder.posSessionId) {
+        await this.posSessionService.updateSessionOnOrderSettlement(
+          existingOrder.posSessionId,
+          paidAmount,
+          settleOrderDto.paymentMethod,
+          session,
+        );
+      }
+
+      // Step 8: Commit transaction
       await session.commitTransaction();
 
-      // Step 8: (Mock) Trigger event to TableService to mark table as VACANT
+      // Step 9: (Mock) Trigger event to TableService to mark table as VACANT
       // This is done after transaction commit to avoid blocking
       if (existingOrder.tableId) {
         await this.tableServiceClient.markTableVacant(
@@ -884,7 +1404,7 @@ export class OrdersService {
         );
       }
 
-      // Step 9: (Mock) Trigger event to InventoryService to deduct stock
+      // Step 10: (Mock) Trigger event to InventoryService to deduct stock
       // Fetch all order items for inventory deduction
       const orderItems = await this.orderItemModel
         .find({ orderId: existingOrder._id })
@@ -901,7 +1421,7 @@ export class OrdersService {
         inventoryItems,
       );
 
-      // Step 10: Format response
+      // Step 11: Format response
       const response: SettleOrderResponseDto = {
         orderId: existingOrder._id.toString(),
         paymentId: savedPayment._id.toString(),
@@ -921,5 +1441,146 @@ export class OrdersService {
     } finally {
       session.endSession();
     }
+  }
+
+  /**
+   * Find KOTs with filters
+   */
+  async findKots(filters: {
+    kitchenId?: string;
+    outletId?: string;
+    date?: string;
+    status?: 'PRINTED' | 'CANCELLED';
+  }): Promise<KotResponseDto[]> {
+    const query: any = {};
+
+    if (filters.kitchenId) {
+      query.kitchenId = new Types.ObjectId(filters.kitchenId);
+    }
+
+    if (filters.outletId) {
+      query.outletId = filters.outletId;
+    }
+
+    if (filters.status) {
+      query.status = filters.status;
+    }
+
+    if (filters.date) {
+      // Parse date and create date range for the day
+      const date = new Date(filters.date);
+      const startOfDay = new Date(date);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(date);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      query.createdAt = {
+        $gte: startOfDay,
+        $lte: endOfDay,
+      };
+    }
+
+    const kots = await this.kotModel
+      .find(query)
+      .sort({ createdAt: -1 })
+      .exec();
+
+    return kots.map((kot) => this.toKotResponseDto(kot));
+  }
+
+  /**
+   * Find KOT by ID
+   */
+  async findKotById(kotId: string): Promise<KotResponseDto> {
+    const kot = await this.kotModel.findById(kotId).exec();
+
+    if (!kot) {
+      throw new NotFoundException(`KOT with ID ${kotId} not found`);
+    }
+
+    return this.toKotResponseDto(kot);
+  }
+
+  /**
+   * Reprint KOT
+   */
+  async reprintKot(kotId: string, printedBy?: string): Promise<KotResponseDto> {
+    const kot = await this.kotModel.findById(kotId).exec();
+
+    if (!kot) {
+      throw new NotFoundException(`KOT with ID ${kotId} not found`);
+    }
+
+    // Update printed timestamp (reprint)
+    kot.printedAt = new Date();
+    if (printedBy) {
+      kot.printedBy = printedBy;
+    }
+
+    const updatedKot = await kot.save();
+    return this.toKotResponseDto(updatedKot);
+  }
+
+  /**
+   * Cancel KOT
+   */
+  async cancelKot(kotId: string, cancelledBy?: string): Promise<KotResponseDto> {
+    const kot = await this.kotModel.findById(kotId).exec();
+
+    if (!kot) {
+      throw new NotFoundException(`KOT with ID ${kotId} not found`);
+    }
+
+    if (kot.status === 'CANCELLED') {
+      throw new BadRequestException('KOT is already cancelled');
+    }
+
+    kot.status = 'CANCELLED';
+    kot.cancelledAt = new Date();
+    if (cancelledBy) {
+      // Store cancelledBy if needed (could add field to schema)
+    }
+
+    const updatedKot = await kot.save();
+
+    // Update order items status to CANCELLED
+    await this.orderItemModel.updateMany(
+      { kotId: kot._id },
+      {
+        $set: {
+          itemStatus: 'CANCELLED',
+          cancelledAt: new Date(),
+        },
+      },
+    );
+
+    return this.toKotResponseDto(updatedKot);
+  }
+
+  /**
+   * Convert KOT document to response DTO
+   */
+  private toKotResponseDto(kot: KotDocument): KotResponseDto {
+    return {
+      kotId: kot._id.toString(),
+      kotNumber: kot.kotNumber,
+      orderId: kot.orderId.toString(),
+      restaurantId: kot.restaurantId,
+      outletId: kot.outletId,
+      kitchenId: kot.kitchenId.toString(),
+      kitchenName: kot.kitchenName,
+      tableId: kot.tableId?.toString(),
+      items: kot.items.map((item) => ({
+        orderItemId: item.orderItemId.toString(),
+        itemName: item.itemName,
+        variantName: item.variantName,
+        quantity: item.quantity,
+        specialInstructions: item.specialInstructions,
+      })),
+      status: kot.status,
+      printedAt: kot.printedAt,
+      printedBy: kot.printedBy,
+      notes: kot.notes,
+    };
   }
 }

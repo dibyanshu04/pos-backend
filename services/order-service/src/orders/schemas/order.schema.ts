@@ -15,9 +15,16 @@ export class Order {
   @Prop({ type: String, index: true })
   waiterId?: string; // Reference to auth-service user (waiter)
 
+  // POS Session Reference
+  @Prop({ type: Types.ObjectId, ref: 'PosSession', index: true })
+  posSessionId?: Types.ObjectId; // Reference to active POS session
+
   // Customer Information
   @Prop({ type: String })
   customerPhone?: string; // Optional customer phone number
+
+  @Prop({ type: String, index: true })
+  customerId?: string; // Optional customer ID reference
 
   // Order Status
   @Prop({
@@ -58,6 +65,10 @@ export class Order {
   // Additional metadata
   @Prop({ type: String })
   notes?: string; // Order notes/comments
+
+  // KOT References (One order can have multiple KOTs - one per kitchen)
+  @Prop({ type: [Types.ObjectId], ref: 'KOT', default: [] })
+  kotIds: Types.ObjectId[]; // Array of KOT IDs generated for this order
 
   @Prop({ type: Date })
   kotPrintedAt?: Date; // Timestamp when KOT was first printed
