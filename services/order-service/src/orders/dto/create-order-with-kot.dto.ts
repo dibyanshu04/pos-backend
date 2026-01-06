@@ -25,6 +25,13 @@ export class OrderItemInputDto {
   @IsString()
   @IsOptional()
   specialInstructions?: string;
+
+  @IsOptional()
+  isComplimentary?: boolean; // Mark item as complimentary (requires RBAC)
+
+  @IsString()
+  @IsOptional()
+  complimentaryReason?: string; // Reason for complimentary (required if isComplimentary = true)
 }
 
 export class CreateOrderWithKotDto {

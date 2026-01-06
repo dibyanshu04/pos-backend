@@ -9,6 +9,7 @@ import {
   IsArray,
   ValidateNested,
   Matches,
+  IsIn,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -157,4 +158,55 @@ export class CreateOutletDto {
   @IsOptional()
   @IsString()
   managerContact?: string;
+
+  @ApiProperty({
+    required: false,
+    description: 'Billing configuration for round-off settings',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => BillingConfigDto)
+  billingConfig?: BillingConfigDto;
+}
+
+class RoundOffConfigDto {
+  @ApiProperty({
+    description: 'Enable/disable round-off',
+    default: true,
+  })
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean;
+
+  @ApiProperty({
+    description: 'Rounding method',
+    enum: ['NEAREST', 'UP', 'DOWN'],
+    default: 'NEAREST',
+  })
+  @IsOptional()
+  @IsString()
+  @IsIn(['NEAREST', 'UP', 'DOWN'])
+  method?: 'NEAREST' | 'UP' | 'DOWN';
+
+  @ApiProperty({
+    description: 'Rounding precision (₹0.05, ₹0.10, or ₹1.00)',
+    enum: [0.05, 0.1, 1.0],
+    default: 0.05,
+  })
+  @IsOptional()
+  @IsNumber()
+  @IsIn([0.05, 0.1, 1.0])
+  precision?: 0.05 | 0.1 | 1.0;
+}
+
+class BillingConfigDto {
+  @ApiProperty({
+    type: RoundOffConfigDto,
+    description: 'Round-off configuration',
+    required: false,
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => RoundOffConfigDto)
+  roundOff?: RoundOffConfigDto;
 }
