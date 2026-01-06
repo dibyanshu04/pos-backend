@@ -20,6 +20,9 @@ import { CreateDraftDto } from './dto/create-draft.dto';
 import { SuccessResponseDto } from './dto/success-response.dto';
 import { FireCourseDto } from '../courses/dto/fire-course.dto';
 import { Request } from 'express';
+import { VoidBillDto } from './dto/void-bill.dto';
+import { MarkComplimentaryDto } from './dto/complimentary-item.dto';
+import { SettleCreditDto } from './dto/settle-credit.dto';
 
 @Controller('orders')
 export class OrdersController {
@@ -171,5 +174,46 @@ export class OrdersController {
   async getOrdersSummary(): Promise<SuccessResponseDto<any>> {
     const summary = await this.ordersService.getOrdersSummary();
     return new SuccessResponseDto(summary, 'Orders summary retrieved');
+  }
+
+  @Post(':orderId/void')
+  @HttpCode(HttpStatus.OK)
+  async voidBill(
+    @Param('orderId') orderId: string,
+    @Body() voidBillDto: VoidBillDto,
+    @Request() req: any, // TODO: Replace with proper user decorator
+  ): Promise<SuccessResponseDto<any>> {
+    // TODO: Extract userId from JWT token when auth is implemented
+    // TODO: Add RBAC guard (OWNER, MANAGER only)
+    const userId = req.user?.userId || 'system'; // Temporary fallback
+
+    const result = await this.ordersService.voidBill(
+      orderId,
+      voidBillDto.reason,
+      userId,
+    );
+    return new SuccessResponseDto(result, 'Bill voided successfully');
+  }
+
+  @Post('items/:orderItemId/complimentary')
+  @HttpCode(HttpStatus.OK)
+  async markItemComplimentary(
+    @Param('orderItemId') orderItemId: string,
+    @Body() markComplimentaryDto: MarkComplimentaryDto,
+    @Request() req: any, // TODO: Replace with proper user decorator
+  ): Promise<SuccessResponseDto<any>> {
+    // TODO: Extract userId from JWT token when auth is implemented
+    // TODO: Add RBAC guard (OWNER, MANAGER, optionally CASHIER)
+    const userId = req.user?.userId || 'system'; // Temporary fallback
+
+    const result = await this.ordersService.markItemComplimentary(
+      orderItemId,
+      markComplimentaryDto.reason,
+      userId,
+    );
+    return new SuccessResponseDto(
+      result,
+      'Item marked as complimentary successfully',
+    );
   }
 }

@@ -29,12 +29,28 @@ export class Order {
   // Order Status
   @Prop({
     type: String,
-    enum: ['DRAFT', 'KOT_PRINTED', 'BILLED', 'COMPLETED', 'CANCELLED'],
+    enum: ['DRAFT', 'KOT_PRINTED', 'BILLED', 'COMPLETED', 'CANCELLED', 'VOIDED'],
     default: 'DRAFT',
     required: true,
     index: true,
   })
-  status: 'DRAFT' | 'KOT_PRINTED' | 'BILLED' | 'COMPLETED' | 'CANCELLED';
+  status: 'DRAFT' | 'KOT_PRINTED' | 'BILLED' | 'COMPLETED' | 'CANCELLED' | 'VOIDED';
+
+  // Void Bill (Petpooja style - bills are NEVER deleted, only voided)
+  @Prop({ type: Boolean, default: false, index: true })
+  isVoided: boolean; // If true, bill is voided (invalid order, no revenue, no GST)
+
+  @Prop({ type: Date })
+  voidedAt?: Date; // Timestamp when bill was voided
+
+  @Prop({ type: String, index: true })
+  voidedByUserId?: string; // User ID who voided the bill
+
+  @Prop({ type: String })
+  voidReason?: string; // Reason for void (mandatory if voided)
+
+  @Prop({ type: Number, default: 0, min: 0 })
+  originalBillAmount: number; // Original bill amount before void (for audit)
 
   // Order Type
   @Prop({
@@ -60,7 +76,18 @@ export class Order {
   discount: number; // Total discount amount
 
   @Prop({ type: Number, required: true, default: 0, min: 0 })
-  total: number; // Final total (subtotal + tax - discount)
+  total: number; // Gross amount (subtotal + tax - discount) - DEPRECATED: use grossAmount
+  // Note: Keeping 'total' for backward compatibility, but it represents grossAmount before round-off
+
+  // Round-off fields (Indian billing - Petpooja style)
+  @Prop({ type: Number, required: false, default: 0 })
+  grossAmount?: number; // Gross amount before round-off (subtotal + tax - discount)
+
+  @Prop({ type: Number, required: false, default: 0 })
+  roundOffAmount?: number; // Round-off adjustment (can be + or -)
+
+  @Prop({ type: Number, required: false, default: 0, min: 0 })
+  netPayable?: number; // Final amount to be paid (after round-off)
 
   // Additional metadata
   @Prop({ type: String })

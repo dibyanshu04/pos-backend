@@ -108,6 +108,31 @@ export class Payment {
 
   @Prop({ type: String })
   processedBy?: string; // User ID who processed the payment
+
+  // Credit / Pay-Later Details (Petpooja style)
+  @Prop({
+    type: {
+      customerName: String,
+      customerPhone: String,
+      dueDate: Date,
+      notes: String,
+      isSettled: { type: Boolean, default: false },
+      settledAt: Date,
+      originalPaymentId: Types.ObjectId, // Reference to original CREDIT payment
+      settledPaymentId: Types.ObjectId, // Reference to settlement payment (CASH/CARD/etc)
+    },
+    required: false,
+  })
+  creditDetails?: {
+    customerName: string;
+    customerPhone?: string;
+    dueDate?: Date;
+    notes?: string;
+    isSettled: boolean;
+    settledAt?: Date;
+    originalPaymentId?: Types.ObjectId;
+    settledPaymentId?: Types.ObjectId;
+  };
 }
 
 export const PaymentSchema = SchemaFactory.createForClass(Payment);
