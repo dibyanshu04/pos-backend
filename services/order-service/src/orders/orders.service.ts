@@ -59,6 +59,7 @@ export class OrdersService {
     private inventoryServiceClient: InventoryServiceClient,
     private posSessionService: PosSessionService,
     private kitchenService: KitchenService,
+    private coursesService: CoursesService,
   ) {}
 
   async create(createOrderDto: CreateOrderDto): Promise<Order> {
@@ -536,34 +537,86 @@ export class OrdersService {
           })),
         );
 
-      // Step 2.1: Get default kitchen for outlet
+      // Step 2.1: Get default kitchen and default course for outlet
       const defaultKitchen = await this.kitchenService.getDefaultKitchenOrFail(
         createOrderDto.outletId,
       );
+      const defaultCourse = await this.coursesService.findDefaultCourse(
+        createOrderDto.outletId,
+      );
 
-      // Step 2.2: Resolve kitchen for each item
-      // If menu item has kitchenId, use it; otherwise use default kitchen
+      if (!defaultCourse) {
+        throw new BadRequestException(
+          'No default course found for this outlet. Please create a default course first.',
+        );
+      }
+
+      // Step 2.2: Resolve kitchen and course for each item
+      // Kitchen Priority: item-level > category-level > default kitchen
+      // Course Priority: item-level > category-level > default course
       const orderItemsData = await Promise.all(
         createOrderDto.items.map(async (item, index) => {
           const validatedItem = validatedItems[index];
           const totalPrice = validatedItem.price * item.quantity;
 
-          // Resolve kitchen: use item's kitchenId if available, else default
-          let kitchenId: Types.ObjectId;
-          let kitchenName: string;
+          // Resolve kitchen
+          const resolutionInput: EnhancedKitchenResolutionInput = {
+            itemKitchenId: validatedItem.kitchenId || null,
+            itemKitchenName: null,
+            categoryKitchenId: validatedItem.categoryKitchenId || null,
+            categoryKitchenName: validatedItem.categoryKitchenName || null,
+            defaultKitchenId: defaultKitchen._id.toString(),
+            defaultKitchenName: defaultKitchen.name,
+          };
 
           if (validatedItem.kitchenId) {
-            // Validate kitchen exists and is active
-            const kitchen = await this.kitchenService.validateKitchen(
+            const itemKitchen = await this.kitchenService.validateKitchen(
               validatedItem.kitchenId,
               createOrderDto.outletId,
             );
-            kitchenId = kitchen._id;
-            kitchenName = kitchen.name;
+            resolutionInput.itemKitchenName = itemKitchen.name;
+          }
+
+          if (validatedItem.categoryKitchenId && !validatedItem.categoryKitchenName) {
+            try {
+              const categoryKitchen = await this.kitchenService.validateKitchen(
+                validatedItem.categoryKitchenId,
+                createOrderDto.outletId,
+              );
+              resolutionInput.categoryKitchenName = categoryKitchen.name;
+            } catch (error) {
+              console.warn(
+                `Category kitchen ${validatedItem.categoryKitchenId} validation failed, will use fallback`,
+              );
+            }
+          }
+
+          const resolvedKitchen = resolveKitchenForItemEnhanced(resolutionInput);
+          const kitchen = await this.kitchenService.validateKitchen(
+            resolvedKitchen.kitchenId,
+            createOrderDto.outletId,
+          );
+
+          // Resolve course (item-level > category-level > default)
+          let courseId: Types.ObjectId;
+          let courseName: string;
+          let courseSequence: number;
+
+          // TODO: Check item-level course (if implemented in menu-service)
+          // For now, use category-level or default
+          if (validatedItem.categoryCourseId) {
+            const categoryCourse = await this.coursesService.validateCourse(
+              validatedItem.categoryCourseId,
+              createOrderDto.outletId,
+            );
+            courseId = categoryCourse._id;
+            courseName = categoryCourse.name;
+            courseSequence = categoryCourse.sequence;
           } else {
-            // Use default kitchen
-            kitchenId = defaultKitchen._id;
-            kitchenName = defaultKitchen.name;
+            // Use default course
+            courseId = defaultCourse._id;
+            courseName = defaultCourse.name;
+            courseSequence = defaultCourse.sequence;
           }
 
           return {
@@ -575,8 +628,11 @@ export class OrdersService {
             quantity: item.quantity,
             totalPrice,
             specialInstructions: item.specialInstructions,
-            kitchenId,
-            kitchenName,
+            kitchenId: new Types.ObjectId(resolvedKitchen.kitchenId),
+            kitchenName: kitchen.name,
+            courseId,
+            courseName,
+            courseSequence,
           };
         }),
       );
@@ -614,7 +670,7 @@ export class OrdersService {
       const order = new this.orderModel(orderData);
       const savedOrder = await order.save({ session });
 
-      // Step 5: Create OrderItems with status 'PRINTED' and kitchenId
+      // Step 5: Create OrderItems with kitchenId and courseId (snapshot)
       const orderItems = orderItemsData.map((itemData) => ({
         orderId: savedOrder._id,
         menuItemId: itemData.menuItemId,
@@ -626,8 +682,10 @@ export class OrdersService {
         totalPrice: itemData.totalPrice,
         specialInstructions: itemData.specialInstructions,
         kitchenId: itemData.kitchenId, // Store kitchen assignment
-        itemStatus: 'PRINTED' as const,
-        printedAt: new Date(),
+        courseId: itemData.courseId, // Store course assignment (snapshot)
+        courseName: itemData.courseName, // Store course name (snapshot)
+        courseSequence: itemData.courseSequence, // Store course sequence (snapshot)
+        itemStatus: 'PENDING' as const, // Will be updated to PRINTED when KOT is printed
       }));
 
       const savedOrderItems = await this.orderItemModel.insertMany(
@@ -635,42 +693,67 @@ export class OrdersService {
         { session },
       );
 
-      // Step 6: Group items by kitchen
-      const itemsByKitchen = new Map<
+      // Step 6: Group items by kitchen + course (Petpooja-style)
+      // groupKey = kitchenId + courseId
+      const itemsByKitchenAndCourse = new Map<
         string,
-        { kitchenId: Types.ObjectId; kitchenName: string; items: any[] }
+        {
+          kitchenId: Types.ObjectId;
+          kitchenName: string;
+          courseId: Types.ObjectId;
+          courseName: string;
+          courseCode: string;
+          courseSequence: number;
+          items: any[];
+        }
       >();
 
-      savedOrderItems.forEach((orderItem) => {
-        const kitchenKey = orderItem.kitchenId.toString();
-        if (!itemsByKitchen.has(kitchenKey)) {
-          // Find kitchen info from orderItemsData
-          const itemData = orderItemsData.find(
-            (d) => d.kitchenId.toString() === kitchenKey,
-          );
-          itemsByKitchen.set(kitchenKey, {
+      // Fetch course codes for all unique courses
+      const uniqueCourseIds = [
+        ...new Set(orderItemsData.map((item) => item.courseId.toString())),
+      ];
+      const coursesMap = new Map<string, { code: string; sequence: number }>();
+      for (const courseId of uniqueCourseIds) {
+        const course = await this.coursesService.findOne(courseId);
+        coursesMap.set(courseId, {
+          code: course.code,
+          sequence: course.sequence,
+        });
+      }
+
+      savedOrderItems.forEach((orderItem, index) => {
+        const itemData = orderItemsData[index];
+        const groupKey = `${orderItem.kitchenId.toString()}_${orderItem.courseId.toString()}`;
+        const courseInfo = coursesMap.get(orderItem.courseId.toString());
+
+        if (!itemsByKitchenAndCourse.has(groupKey)) {
+          itemsByKitchenAndCourse.set(groupKey, {
             kitchenId: orderItem.kitchenId,
-            kitchenName: itemData?.kitchenName || 'Unknown Kitchen',
+            kitchenName: itemData.kitchenName,
+            courseId: orderItem.courseId,
+            courseName: itemData.courseName,
+            courseCode: courseInfo?.code || 'UNKNOWN',
+            courseSequence: itemData.courseSequence,
             items: [],
           });
         }
-        itemsByKitchen.get(kitchenKey)!.items.push(orderItem);
+        itemsByKitchenAndCourse.get(groupKey)!.items.push(orderItem);
       });
 
-      // Step 7: Generate KOTs per kitchen
+      // Step 7: Generate KOTs per kitchen + course combination
       const savedKots: KotDocument[] = [];
       const kotIds: Types.ObjectId[] = [];
 
-      for (const [kitchenKey, kitchenGroup] of itemsByKitchen.entries()) {
-        // Generate KOT number for this kitchen
+      for (const [groupKey, group] of itemsByKitchenAndCourse.entries()) {
+        // Generate KOT number for this kitchen (per kitchen, not per course)
         const kotNumber = await this.generateKotNumber(
           createOrderDto.outletId,
-          kitchenGroup.kitchenId,
+          group.kitchenId,
           session,
         );
 
-        // Create KOT items for this kitchen
-        const kotItems = kitchenGroup.items.map((orderItem) => ({
+        // Create KOT items for this kitchen + course combination
+        const kotItems = group.items.map((orderItem) => ({
           orderItemId: orderItem._id,
           itemName: orderItem.itemName,
           variantName: orderItem.variantName,
@@ -678,19 +761,27 @@ export class OrdersService {
           specialInstructions: orderItem.specialInstructions,
         }));
 
+        // Determine KOT status based on course
+        // STARTER courses (sequence 1) are printed immediately, others are PENDING
+        const isStarterCourse = group.courseSequence === 1 || group.courseCode === 'STARTER';
+        const kotStatus: 'PENDING' | 'PRINTED' = isStarterCourse ? 'PRINTED' : 'PENDING';
+
         // Create KOT record
         const kotData = {
           orderId: savedOrder._id,
           restaurantId: createOrderDto.restaurantId,
           outletId: createOrderDto.outletId,
-          kitchenId: kitchenGroup.kitchenId,
-          kitchenName: kitchenGroup.kitchenName,
+          kitchenId: group.kitchenId,
+          kitchenName: group.kitchenName,
+          courseId: group.courseId,
+          courseName: group.courseName,
+          courseSequence: group.courseSequence,
           tableId,
           kotNumber,
           items: kotItems,
-          status: 'PRINTED' as const,
-          printedAt: new Date(),
-          printedBy: createOrderDto.waiterId,
+          status: kotStatus,
+          printedAt: kotStatus === 'PRINTED' ? new Date() : undefined,
+          printedBy: kotStatus === 'PRINTED' ? createOrderDto.waiterId : undefined,
           notes: createOrderDto.notes,
         };
 
@@ -699,10 +790,16 @@ export class OrdersService {
         savedKots.push(savedKot);
         kotIds.push(savedKot._id);
 
-        // Update OrderItems with kotId for this kitchen
+        // Update OrderItems with kotId and itemStatus
+        const updateData: any = { kotId: savedKot._id };
+        if (kotStatus === 'PRINTED') {
+          updateData.itemStatus = 'PRINTED';
+          updateData.printedAt = new Date();
+        }
+
         await this.orderItemModel.updateMany(
-          { _id: { $in: kitchenGroup.items.map((item) => item._id) } },
-          { $set: { kotId: savedKot._id } },
+          { _id: { $in: group.items.map((item) => item._id) } },
+          { $set: updateData },
           { session },
         );
       }
@@ -1590,6 +1687,9 @@ export class OrdersService {
       cancelledAt: kot.cancelledAt,
       cancelledByUserId: kot.cancelledByUserId,
       notes: kot.notes,
+      courseId: kot.courseId?.toString(),
+      courseName: kot.courseName,
+      courseSequence: kot.courseSequence,
     };
   }
 
@@ -1641,6 +1741,9 @@ export class OrdersService {
         outletId: originalKot.outletId,
         kitchenId: originalKot.kitchenId,
         kitchenName: originalKot.kitchenName,
+        courseId: originalKot.courseId, // Copy course fields from original
+        courseName: originalKot.courseName,
+        courseSequence: originalKot.courseSequence,
         tableId: originalKot.tableId,
         kotNumber: originalKot.kotNumber, // Same kotNumber
         items: originalKot.items.map((item) => ({
@@ -1764,6 +1867,9 @@ export class OrdersService {
         outletId: originalKot.outletId,
         kitchenId: originalKot.kitchenId,
         kitchenName: originalKot.kitchenName,
+        courseId: originalKot.courseId, // Copy course fields from original
+        courseName: originalKot.courseName,
+        courseSequence: originalKot.courseSequence,
         tableId: originalKot.tableId,
         kotNumber: originalKot.kotNumber, // Same kotNumber
         items: itemsToCancel,
@@ -1914,6 +2020,9 @@ export class OrdersService {
         outletId: originalKot.outletId,
         kitchenId: originalKot.kitchenId,
         kitchenName: originalKot.kitchenName,
+        courseId: originalKot.courseId, // Copy course fields from original
+        courseName: originalKot.courseName,
+        courseSequence: originalKot.courseSequence,
         tableId: originalKot.tableId,
         kotNumber: originalKot.kotNumber, // Same kotNumber
         items: itemsToCancel,
@@ -1944,6 +2053,9 @@ export class OrdersService {
         outletId: originalKot.outletId,
         kitchenId: destinationKitchen._id,
         kitchenName: destinationKitchen.name,
+        courseId: originalKot.courseId, // Copy course fields from original (course doesn't change on transfer)
+        courseName: originalKot.courseName,
+        courseSequence: originalKot.courseSequence,
         tableId: originalKot.tableId,
         kotNumber: transferKotNumber, // New kotNumber for destination kitchen
         items: itemsToTransfer,
@@ -1979,6 +2091,130 @@ export class OrdersService {
       return {
         cancellationKot: this.toKotResponseDto(savedCancellationKot),
         transferKot: this.toKotResponseDto(savedTransferKot),
+      };
+    } catch (error) {
+      await session.abortTransaction();
+      throw error;
+    } finally {
+      session.endSession();
+    }
+  }
+
+  /**
+   * Fire a course (print pending KOTs for a specific course)
+   * Petpooja-style: prints all PENDING KOTs for the specified course
+   */
+  async fireCourse(
+    orderId: string,
+    fireCourseDto: FireCourseDto,
+    userId: string,
+  ): Promise<{ kots: KotResponseDto[]; course: CourseResponseDto }> {
+    const session = await this.connection.startSession();
+    session.startTransaction();
+
+    try {
+      // Step 1: Find order
+      const order = await this.orderModel
+        .findById(orderId)
+        .session(session)
+        .exec();
+
+      if (!order) {
+        throw new NotFoundException(`Order with ID ${orderId} not found`);
+      }
+
+      // Step 2: Validate POS session is open
+      const activeSession = await this.posSessionService.findActiveSession(
+        order.outletId || '',
+      );
+      if (!activeSession) {
+        throw new BadRequestException(
+          'No active POS session found. Cannot fire course.',
+        );
+      }
+
+      // Step 3: Find course by code
+      const course = await this.coursesService.findByCodeAndOutlet(
+        fireCourseDto.courseCode,
+        order.outletId || '',
+      );
+
+      if (!course) {
+        throw new NotFoundException(
+          `Course with code ${fireCourseDto.courseCode} not found or inactive`,
+        );
+      }
+
+      // Step 4: Find all PENDING KOTs for this order and course
+      const pendingKots = await this.kotModel
+        .find({
+          orderId: new Types.ObjectId(orderId),
+          courseId: course._id,
+          status: 'PENDING',
+        })
+        .session(session)
+        .exec();
+
+      if (pendingKots.length === 0) {
+        throw new BadRequestException(
+          `No pending KOTs found for course ${fireCourseDto.courseCode} in this order`,
+        );
+      }
+
+      // Step 5: Update KOTs to PRINTED status
+      const kotIds = pendingKots.map((kot) => kot._id);
+      await this.kotModel.updateMany(
+        { _id: { $in: kotIds } },
+        {
+          $set: {
+            status: 'PRINTED',
+            printedAt: new Date(),
+            printedBy: userId,
+          },
+        },
+        { session },
+      );
+
+      // Step 6: Update order items status to PRINTED
+      const orderItemIds = pendingKots.flatMap((kot) =>
+        kot.items.map((item) => item.orderItemId),
+      );
+
+      await this.orderItemModel.updateMany(
+        {
+          _id: { $in: orderItemIds },
+          orderId: new Types.ObjectId(orderId),
+        },
+        {
+          $set: {
+            itemStatus: 'PRINTED',
+            printedAt: new Date(),
+          },
+        },
+        { session },
+      );
+
+      await session.commitTransaction();
+
+      // Step 7: Fetch updated KOTs for response
+      const updatedKots = await this.kotModel
+        .find({ _id: { $in: kotIds } })
+        .exec();
+
+      return {
+        kots: updatedKots.map((kot) => this.toKotResponseDto(kot)),
+        course: {
+          _id: course._id.toString(),
+          restaurantId: course.restaurantId,
+          outletId: course.outletId,
+          name: course.name,
+          code: course.code,
+          sequence: course.sequence,
+          isDefault: course.isDefault,
+          isActive: course.isActive,
+          createdAt: course.createdAt,
+          updatedAt: course.updatedAt,
+        },
       };
     } catch (error) {
       await session.abortTransaction();

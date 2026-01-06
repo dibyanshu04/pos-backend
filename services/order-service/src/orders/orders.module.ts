@@ -14,6 +14,7 @@ import { TaxConfigService } from './services/tax-config.service';
 import { InventoryServiceClient } from './services/inventory-service.client';
 import { PosSessionModule } from '../pos-session/pos-session.module';
 import { KitchenModule } from '../kitchen/kitchen.module';
+import { CoursesModule } from '../courses/courses.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { KitchenModule } from '../kitchen/kitchen.module';
     ]),
     PosSessionModule,
     KitchenModule,
+    CoursesModule,
   ],
   controllers: [OrdersController, KotController],
   providers: [

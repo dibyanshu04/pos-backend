@@ -46,6 +46,16 @@ export class OrderItem {
   @Prop({ type: Types.ObjectId, ref: 'Kitchen', index: true })
   kitchenId?: Types.ObjectId; // Kitchen assigned to this item (snapshot)
 
+  // Course Assignment (snapshot at time of order) - CRITICAL: Never resolve dynamically
+  @Prop({ type: Types.ObjectId, index: true })
+  courseId?: Types.ObjectId; // Course assigned to this item (snapshot)
+
+  @Prop({ type: String })
+  courseName?: string; // Course name snapshot (e.g., "Starter", "Main Course")
+
+  @Prop({ type: Number })
+  courseSequence?: number; // Course sequence snapshot (1, 2, 3, etc.)
+
   // Item Status
   @Prop({
     type: String,

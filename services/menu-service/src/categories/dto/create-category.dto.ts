@@ -106,4 +106,12 @@ export class CreateCategoryDto {
   @IsOptional()
   @IsString()
   kitchenId?: string;
+
+  @ApiProperty({
+    required: false,
+    description: 'Course ID for category-level course mapping',
+  })
+  @IsOptional()
+  @IsString()
+  courseId?: string;
 }

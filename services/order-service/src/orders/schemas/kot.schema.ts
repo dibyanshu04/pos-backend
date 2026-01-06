@@ -88,15 +88,25 @@ export class KOT {
   @Prop({ type: String })
   actionReason?: string; // Reason for reprint/cancel/transfer
 
-  // KOT Status
+  // Course Assignment (snapshot at time of KOT creation)
+  @Prop({ type: Types.ObjectId, index: true })
+  courseId?: Types.ObjectId; // Course assigned to this KOT
+
+  @Prop({ type: String })
+  courseName?: string; // Course name snapshot (e.g., "Starter", "Main Course")
+
+  @Prop({ type: Number })
+  courseSequence?: number; // Course sequence snapshot (1, 2, 3, etc.)
+
+  // KOT Status (PENDING = waiting for fire-course, PRINTED = sent to kitchen)
   @Prop({
     type: String,
-    enum: ['PRINTED', 'CANCELLED'],
+    enum: ['PENDING', 'PRINTED', 'CANCELLED'],
     default: 'PRINTED',
     required: true,
     index: true,
   })
-  status: 'PRINTED' | 'CANCELLED';
+  status: 'PENDING' | 'PRINTED' | 'CANCELLED';
 
   // Print Information
   @Prop({ type: Date, default: Date.now })
@@ -128,3 +138,5 @@ KotSchema.index({ kitchenId: 1, status: 1, printedAt: -1 });
 KotSchema.index({ outletId: 1, kitchenId: 1, createdAt: -1 });
 KotSchema.index({ parentKotId: 1 }); // For tracking KOT operations
 KotSchema.index({ type: 1, parentKotId: 1 }); // For querying KOT history
+KotSchema.index({ orderId: 1, courseId: 1, status: 1 }); // For fire-course queries
+KotSchema.index({ outletId: 1, kitchenId: 1, courseId: 1 }); // For KOT grouping

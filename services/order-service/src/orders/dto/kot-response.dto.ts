@@ -69,7 +69,10 @@ export class KotResponseDto {
   })
   actionReason?: string;
 
-  @ApiProperty({ enum: ['PRINTED', 'CANCELLED'], description: 'KOT status' })
+  @ApiProperty({
+    enum: ['PENDING', 'PRINTED', 'CANCELLED'],
+    description: 'KOT status (PENDING = waiting for fire-course, PRINTED = sent to kitchen)',
+  })
   status: string;
 
   @ApiProperty({ description: 'Printed at timestamp' })
@@ -86,6 +89,21 @@ export class KotResponseDto {
 
   @ApiPropertyOptional({ description: 'KOT notes' })
   notes?: string;
+
+  @ApiPropertyOptional({
+    description: 'Course ID (for course-based KOT grouping)',
+  })
+  courseId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Course name (e.g., "Starter", "Main Course")',
+  })
+  courseName?: string;
+
+  @ApiPropertyOptional({
+    description: 'Course sequence (serving order)',
+  })
+  courseSequence?: number;
 }
 
 export class CreateOrderWithKotResponseDto {

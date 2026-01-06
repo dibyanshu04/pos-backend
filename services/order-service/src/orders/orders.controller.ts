@@ -18,6 +18,8 @@ import { GenerateBillDto } from './dto/generate-bill.dto';
 import { SettleOrderDto } from './dto/settle-order.dto';
 import { CreateDraftDto } from './dto/create-draft.dto';
 import { SuccessResponseDto } from './dto/success-response.dto';
+import { FireCourseDto } from '../courses/dto/fire-course.dto';
+import { Request } from 'express';
 
 @Controller('orders')
 export class OrdersController {
@@ -97,6 +99,27 @@ export class OrdersController {
     return new SuccessResponseDto(
       result,
       'Order settled successfully',
+    );
+  }
+
+  @Post(':orderId/fire-course')
+  @HttpCode(HttpStatus.OK)
+  async fireCourse(
+    @Param('orderId') orderId: string,
+    @Body() fireCourseDto: FireCourseDto,
+    @Request() req: any, // TODO: Replace with proper user decorator
+  ): Promise<SuccessResponseDto<any>> {
+    // TODO: Extract userId from JWT token when auth is implemented
+    const userId = req.user?.userId || 'system'; // Temporary fallback
+
+    const result = await this.ordersService.fireCourse(
+      orderId,
+      fireCourseDto,
+      userId,
+    );
+    return new SuccessResponseDto(
+      result,
+      `Course ${fireCourseDto.courseCode} fired successfully`,
     );
   }
 

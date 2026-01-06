@@ -8,7 +8,10 @@ export interface MenuItemPrice {
   price: number;
   isAvailable: boolean;
   taxIds?: string[]; // Tax IDs associated with this item
-  kitchenId?: string; // Kitchen ID assigned to this item (from menu-service)
+  kitchenId?: string; // Kitchen ID assigned to this item (from menu-service) - item-level
+  categoryKitchenId?: string; // Kitchen ID assigned to item's category (from menu-service) - category-level
+  categoryKitchenName?: string; // Kitchen name for category (optional, for better resolution)
+  categoryCourseId?: string; // Course ID assigned to item's category (from menu-service) - category-level
 }
 
 export interface TaxDetail {

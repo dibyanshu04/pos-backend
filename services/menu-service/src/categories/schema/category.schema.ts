@@ -65,6 +65,10 @@ export class Category {
   // Kitchen mapping (optional) - Category-level kitchen assignment
   @Prop({ type: Types.ObjectId, ref: 'Kitchen' })
   kitchenId?: Types.ObjectId;
+
+  // Course mapping (optional) - Category-level course assignment
+  @Prop({ type: Types.ObjectId })
+  courseId?: Types.ObjectId; // Reference to Course (in order-service)
 }
 
 export const CategorySchema = SchemaFactory.createForClass(Category);
