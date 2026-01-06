@@ -15,6 +15,13 @@ export class KotItemResponseDto {
 
   @ApiPropertyOptional({ description: 'Special instructions' })
   specialInstructions?: string;
+
+  @ApiPropertyOptional({
+    enum: ['ACTIVE', 'CANCELLED', 'TRANSFERRED'],
+    description: 'Item status for audit trail',
+    default: 'ACTIVE',
+  })
+  status?: 'ACTIVE' | 'CANCELLED' | 'TRANSFERRED';
 }
 
 export class KotResponseDto {
@@ -45,6 +52,23 @@ export class KotResponseDto {
   @ApiProperty({ type: [KotItemResponseDto], description: 'KOT items' })
   items: KotItemResponseDto[];
 
+  @ApiProperty({
+    enum: ['NORMAL', 'REPRINT', 'CANCELLATION', 'TRANSFER'],
+    description: 'KOT type',
+    default: 'NORMAL',
+  })
+  type: 'NORMAL' | 'REPRINT' | 'CANCELLATION' | 'TRANSFER';
+
+  @ApiPropertyOptional({
+    description: 'Parent KOT ID (for REPRINT, CANCELLATION, TRANSFER operations)',
+  })
+  parentKotId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Action reason (mandatory for REPRINT, CANCELLATION, TRANSFER)',
+  })
+  actionReason?: string;
+
   @ApiProperty({ enum: ['PRINTED', 'CANCELLED'], description: 'KOT status' })
   status: string;
 
@@ -53,6 +77,12 @@ export class KotResponseDto {
 
   @ApiPropertyOptional({ description: 'User ID who printed the KOT' })
   printedBy?: string;
+
+  @ApiPropertyOptional({ description: 'Cancelled at timestamp' })
+  cancelledAt?: Date;
+
+  @ApiPropertyOptional({ description: 'User ID who cancelled the KOT' })
+  cancelledByUserId?: string;
 
   @ApiPropertyOptional({ description: 'KOT notes' })
   notes?: string;

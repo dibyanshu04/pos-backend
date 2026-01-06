@@ -31,6 +31,9 @@ import {
   CreateOrderWithKotResponseDto,
   KotResponseDto,
 } from './dto/kot-response.dto';
+import { KotReprintDto } from './dto/kot-reprint.dto';
+import { KotCancelDto } from './dto/kot-cancel.dto';
+import { KotTransferDto } from './dto/kot-transfer.dto';
 import { TableServiceClient } from './services/table-service.client';
 import { MenuServiceClient } from './services/menu-service.client';
 import { TaxConfigService } from './services/tax-config.service';
@@ -1570,17 +1573,418 @@ export class OrdersService {
       kitchenId: kot.kitchenId.toString(),
       kitchenName: kot.kitchenName,
       tableId: kot.tableId?.toString(),
+      type: kot.type || 'NORMAL',
+      parentKotId: kot.parentKotId?.toString(),
+      actionReason: kot.actionReason,
       items: kot.items.map((item) => ({
         orderItemId: item.orderItemId.toString(),
         itemName: item.itemName,
         variantName: item.variantName,
         quantity: item.quantity,
         specialInstructions: item.specialInstructions,
+        status: item.status || 'ACTIVE',
       })),
       status: kot.status,
       printedAt: kot.printedAt,
       printedBy: kot.printedBy,
+      cancelledAt: kot.cancelledAt,
+      cancelledByUserId: kot.cancelledByUserId,
       notes: kot.notes,
     };
+  }
+
+  /**
+   * Reprint a KOT (Petpooja-style)
+   * Creates a new REPRINT type KOT with same kotNumber and items
+   * Original KOT remains unchanged
+   */
+  async reprintKot(
+    kotId: string,
+    reprintDto: KotReprintDto,
+    userId: string,
+  ): Promise<KotResponseDto> {
+    const session = await this.connection.startSession();
+    session.startTransaction();
+
+    try {
+      // Step 1: Find original KOT
+      const originalKot = await this.kotModel
+        .findById(kotId)
+        .session(session)
+        .exec();
+
+      if (!originalKot) {
+        throw new NotFoundException(`KOT with ID ${kotId} not found`);
+      }
+
+      // Step 2: Validate KOT is PRINTED
+      if (originalKot.status !== 'PRINTED') {
+        throw new BadRequestException(
+          `Cannot reprint KOT with status ${originalKot.status}. Only PRINTED KOTs can be reprinted.`,
+        );
+      }
+
+      // Step 3: Validate POS session is open
+      const activeSession = await this.posSessionService.findActiveSession(
+        originalKot.outletId,
+      );
+      if (!activeSession) {
+        throw new BadRequestException(
+          'No active POS session found. Cannot reprint KOT.',
+        );
+      }
+
+      // Step 4: Create REPRINT KOT with same kotNumber and items
+      const reprintKot = new this.kotModel({
+        orderId: originalKot.orderId,
+        restaurantId: originalKot.restaurantId,
+        outletId: originalKot.outletId,
+        kitchenId: originalKot.kitchenId,
+        kitchenName: originalKot.kitchenName,
+        tableId: originalKot.tableId,
+        kotNumber: originalKot.kotNumber, // Same kotNumber
+        items: originalKot.items.map((item) => ({
+          ...item.toObject(),
+          status: 'ACTIVE', // All items remain ACTIVE in reprint
+        })),
+        type: 'REPRINT',
+        parentKotId: originalKot._id,
+        actionReason: reprintDto.reason,
+        status: 'PRINTED',
+        printedAt: new Date(),
+        printedBy: userId,
+        notes: originalKot.notes,
+      });
+
+      const savedReprintKot = await reprintKot.save({ session });
+
+      await session.commitTransaction();
+
+      return this.toKotResponseDto(savedReprintKot);
+    } catch (error) {
+      await session.abortTransaction();
+      throw error;
+    } finally {
+      session.endSession();
+    }
+  }
+
+  /**
+   * Cancel a KOT (Full or Partial)
+   * Creates a new CANCELLATION type KOT
+   * Original KOT remains unchanged
+   */
+  async cancelKot(
+    kotId: string,
+    cancelDto: KotCancelDto,
+    userId: string,
+  ): Promise<KotResponseDto> {
+    const session = await this.connection.startSession();
+    session.startTransaction();
+
+    try {
+      // Step 1: Find original KOT
+      const originalKot = await this.kotModel
+        .findById(kotId)
+        .session(session)
+        .exec();
+
+      if (!originalKot) {
+        throw new NotFoundException(`KOT with ID ${kotId} not found`);
+      }
+
+      // Step 2: Validate KOT is PRINTED
+      if (originalKot.status !== 'PRINTED') {
+        throw new BadRequestException(
+          `Cannot cancel KOT with status ${originalKot.status}. Only PRINTED KOTs can be cancelled.`,
+        );
+      }
+
+      // Step 3: Validate POS session is open
+      const activeSession = await this.posSessionService.findActiveSession(
+        originalKot.outletId,
+      );
+      if (!activeSession) {
+        throw new BadRequestException(
+          'No active POS session found. Cannot cancel KOT.',
+        );
+      }
+
+      // Step 4: Determine items to cancel
+      let itemsToCancel: typeof originalKot.items;
+
+      if (cancelDto.items && cancelDto.items.length > 0) {
+        // Partial cancellation - validate items
+        itemsToCancel = [];
+
+        for (const cancelItem of cancelDto.items) {
+          // Find matching item in original KOT by orderItemId
+          const kotItem = originalKot.items.find(
+            (item) => item.orderItemId.toString() === cancelItem.orderItemId,
+          );
+
+          if (!kotItem) {
+            throw new BadRequestException(
+              `Order item ${cancelItem.orderItemId} not found in KOT`,
+            );
+          }
+
+          // Check if item is already cancelled or transferred
+          if (kotItem.status === 'CANCELLED' || kotItem.status === 'TRANSFERRED') {
+            throw new BadRequestException(
+              `Item ${cancelItem.menuItemId} is already ${kotItem.status.toLowerCase()}`,
+            );
+          }
+
+          // Validate quantity
+          if (cancelItem.quantity > kotItem.quantity) {
+            throw new BadRequestException(
+              `Cannot cancel ${cancelItem.quantity} of order item ${cancelItem.orderItemId}. Only ${kotItem.quantity} available.`,
+            );
+          }
+
+          itemsToCancel.push({
+            ...kotItem.toObject(),
+            quantity: cancelItem.quantity,
+            status: 'CANCELLED',
+          });
+        }
+      } else {
+        // Full cancellation - cancel all items
+        itemsToCancel = originalKot.items.map((item) => ({
+          ...item.toObject(),
+          status: 'CANCELLED',
+        }));
+      }
+
+      // Step 5: Create CANCELLATION KOT
+      const cancellationKot = new this.kotModel({
+        orderId: originalKot.orderId,
+        restaurantId: originalKot.restaurantId,
+        outletId: originalKot.outletId,
+        kitchenId: originalKot.kitchenId,
+        kitchenName: originalKot.kitchenName,
+        tableId: originalKot.tableId,
+        kotNumber: originalKot.kotNumber, // Same kotNumber
+        items: itemsToCancel,
+        type: 'CANCELLATION',
+        parentKotId: originalKot._id,
+        actionReason: cancelDto.reason,
+        status: 'PRINTED',
+        printedAt: new Date(),
+        printedBy: userId,
+        cancelledAt: new Date(),
+        cancelledByUserId: userId,
+        notes: `Cancellation: ${cancelDto.reason}`,
+      });
+
+      const savedCancellationKot = await cancellationKot.save({ session });
+
+      // Step 6: Update order items status (mark as cancelled)
+      const orderItemIds = itemsToCancel.map((item) => item.orderItemId);
+      await this.orderItemModel.updateMany(
+        {
+          _id: { $in: orderItemIds },
+          orderId: originalKot.orderId,
+        },
+        {
+          $set: {
+            itemStatus: 'CANCELLED',
+            cancelledAt: new Date(),
+          },
+        },
+        { session },
+      );
+
+      await session.commitTransaction();
+
+      return this.toKotResponseDto(savedCancellationKot);
+    } catch (error) {
+      await session.abortTransaction();
+      throw error;
+    } finally {
+      session.endSession();
+    }
+  }
+
+  /**
+   * Transfer KOT items to another kitchen (Petpooja-style)
+   * Creates 2 KOTs:
+   * 1. CANCELLATION KOT in source kitchen
+   * 2. NORMAL KOT in destination kitchen
+   * Must be transactional
+   */
+  async transferKot(
+    kotId: string,
+    transferDto: KotTransferDto,
+    userId: string,
+  ): Promise<{ cancellationKot: KotResponseDto; transferKot: KotResponseDto }> {
+    const session = await this.connection.startSession();
+    session.startTransaction();
+
+    try {
+      // Step 1: Find original KOT
+      const originalKot = await this.kotModel
+        .findById(kotId)
+        .session(session)
+        .exec();
+
+      if (!originalKot) {
+        throw new NotFoundException(`KOT with ID ${kotId} not found`);
+      }
+
+      // Step 2: Validate KOT is PRINTED
+      if (originalKot.status !== 'PRINTED') {
+        throw new BadRequestException(
+          `Cannot transfer KOT with status ${originalKot.status}. Only PRINTED KOTs can be transferred.`,
+        );
+      }
+
+      // Step 3: Validate POS session is open
+      const activeSession = await this.posSessionService.findActiveSession(
+        originalKot.outletId,
+      );
+      if (!activeSession) {
+        throw new BadRequestException(
+          'No active POS session found. Cannot transfer KOT.',
+        );
+      }
+
+      // Step 4: Validate destination kitchen
+      const destinationKitchen = await this.kitchenService.validateKitchen(
+        transferDto.toKitchenId,
+        originalKot.outletId,
+      );
+
+      if (destinationKitchen._id.toString() === originalKot.kitchenId.toString()) {
+        throw new BadRequestException(
+          'Cannot transfer to the same kitchen',
+        );
+      }
+
+      // Step 5: Validate and prepare items to transfer
+      const itemsToTransfer: typeof originalKot.items = [];
+      const itemsToCancel: typeof originalKot.items = [];
+
+      for (const transferItem of transferDto.items) {
+        // Find matching item in original KOT by orderItemId
+        const kotItem = originalKot.items.find(
+          (item) => item.orderItemId.toString() === transferItem.orderItemId,
+        );
+
+        if (!kotItem) {
+          throw new BadRequestException(
+            `Order item ${transferItem.orderItemId} not found in KOT`,
+          );
+        }
+
+        // Check if item is already cancelled or transferred
+        if (kotItem.status === 'CANCELLED' || kotItem.status === 'TRANSFERRED') {
+          throw new BadRequestException(
+            `Item ${transferItem.menuItemId} is already ${kotItem.status.toLowerCase()}`,
+          );
+        }
+
+        // Validate quantity
+        if (transferItem.quantity > kotItem.quantity) {
+          throw new BadRequestException(
+            `Cannot transfer ${transferItem.quantity} of order item ${transferItem.orderItemId}. Only ${kotItem.quantity} available.`,
+          );
+        }
+
+        // Add to cancellation list (source kitchen)
+        itemsToCancel.push({
+          ...kotItem.toObject(),
+          quantity: transferItem.quantity,
+          status: 'TRANSFERRED',
+        });
+
+        // Add to transfer list (destination kitchen)
+        itemsToTransfer.push({
+          ...kotItem.toObject(),
+          quantity: transferItem.quantity,
+          status: 'ACTIVE',
+        });
+      }
+
+      // Step 6: Create CANCELLATION KOT in source kitchen
+      const cancellationKot = new this.kotModel({
+        orderId: originalKot.orderId,
+        restaurantId: originalKot.restaurantId,
+        outletId: originalKot.outletId,
+        kitchenId: originalKot.kitchenId,
+        kitchenName: originalKot.kitchenName,
+        tableId: originalKot.tableId,
+        kotNumber: originalKot.kotNumber, // Same kotNumber
+        items: itemsToCancel,
+        type: 'CANCELLATION',
+        parentKotId: originalKot._id,
+        actionReason: `Transfer to ${destinationKitchen.name}: ${transferDto.reason}`,
+        status: 'PRINTED',
+        printedAt: new Date(),
+        printedBy: userId,
+        cancelledAt: new Date(),
+        cancelledByUserId: userId,
+        notes: `Transferred to ${destinationKitchen.name}`,
+      });
+
+      const savedCancellationKot = await cancellationKot.save({ session });
+
+      // Step 7: Generate new KOT number for destination kitchen
+      const transferKotNumber = await this.generateKotNumber(
+        originalKot.outletId,
+        destinationKitchen._id,
+        session,
+      );
+
+      // Step 8: Create NORMAL KOT in destination kitchen
+      const transferKot = new this.kotModel({
+        orderId: originalKot.orderId,
+        restaurantId: originalKot.restaurantId,
+        outletId: originalKot.outletId,
+        kitchenId: destinationKitchen._id,
+        kitchenName: destinationKitchen.name,
+        tableId: originalKot.tableId,
+        kotNumber: transferKotNumber, // New kotNumber for destination kitchen
+        items: itemsToTransfer,
+        type: 'NORMAL',
+        parentKotId: originalKot._id,
+        actionReason: `Transferred from ${originalKot.kitchenName}: ${transferDto.reason}`,
+        status: 'PRINTED',
+        printedAt: new Date(),
+        printedBy: userId,
+        notes: `Transferred from ${originalKot.kitchenName}`,
+      });
+
+      const savedTransferKot = await transferKot.save({ session });
+
+      // Step 9: Update order items status (mark as transferred and update kitchen)
+      const orderItemIds = itemsToTransfer.map((item) => item.orderItemId);
+      await this.orderItemModel.updateMany(
+        {
+          _id: { $in: orderItemIds },
+          orderId: originalKot.orderId,
+        },
+        {
+          $set: {
+            kitchenId: destinationKitchen._id,
+            // Note: itemStatus remains PRINTED, but kitchen changed
+          },
+        },
+        { session },
+      );
+
+      await session.commitTransaction();
+
+      return {
+        cancellationKot: this.toKotResponseDto(savedCancellationKot),
+        transferKot: this.toKotResponseDto(savedTransferKot),
+      };
+    } catch (error) {
+      await session.abortTransaction();
+      throw error;
+    } finally {
+      session.endSession();
+    }
   }
 }

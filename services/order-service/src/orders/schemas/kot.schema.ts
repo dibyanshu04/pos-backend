@@ -20,6 +20,14 @@ export class KotItem {
 
   @Prop({ type: String })
   specialInstructions?: string; // Special instructions for this item
+
+  // Item status for audit trail (used in cancellation/transfer operations)
+  @Prop({
+    type: String,
+    enum: ['ACTIVE', 'CANCELLED', 'TRANSFERRED'],
+    default: 'ACTIVE',
+  })
+  status?: 'ACTIVE' | 'CANCELLED' | 'TRANSFERRED';
 }
 
 export const KotItemSchema = SchemaFactory.createForClass(KotItem);
@@ -62,6 +70,24 @@ export class KOT {
   @Prop({ type: [KotItemSchema], required: true, default: [] })
   items: KotItem[]; // Snapshot of items printed in this KOT
 
+  // KOT Type (NORMAL, REPRINT, CANCELLATION, TRANSFER)
+  @Prop({
+    type: String,
+    enum: ['NORMAL', 'REPRINT', 'CANCELLATION', 'TRANSFER'],
+    default: 'NORMAL',
+    required: true,
+    index: true,
+  })
+  type: 'NORMAL' | 'REPRINT' | 'CANCELLATION' | 'TRANSFER';
+
+  // Parent KOT Reference (for REPRINT, CANCELLATION, TRANSFER operations)
+  @Prop({ type: Types.ObjectId, ref: 'KOT', index: true })
+  parentKotId?: Types.ObjectId; // Reference to original KOT
+
+  // Action reason (mandatory for REPRINT, CANCELLATION, TRANSFER)
+  @Prop({ type: String })
+  actionReason?: string; // Reason for reprint/cancel/transfer
+
   // KOT Status
   @Prop({
     type: String,
@@ -79,12 +105,16 @@ export class KOT {
   @Prop({ type: String })
   printedBy?: string; // User ID who printed the KOT
 
+  // Cancellation Information
+  @Prop({ type: Date })
+  cancelledAt?: Date; // Timestamp when KOT was cancelled
+
+  @Prop({ type: String })
+  cancelledByUserId?: string; // User ID who cancelled the KOT
+
   // Additional metadata
   @Prop({ type: String })
   notes?: string; // KOT-specific notes
-
-  @Prop({ type: Date })
-  cancelledAt?: Date; // Timestamp when KOT was cancelled
 }
 
 export const KotSchema = SchemaFactory.createForClass(KOT);
@@ -96,3 +126,5 @@ KotSchema.index({ restaurantId: 1, tableId: 1, status: 1 });
 KotSchema.index({ restaurantId: 1, printedAt: -1 });
 KotSchema.index({ kitchenId: 1, status: 1, printedAt: -1 });
 KotSchema.index({ outletId: 1, kitchenId: 1, createdAt: -1 });
+KotSchema.index({ parentKotId: 1 }); // For tracking KOT operations
+KotSchema.index({ type: 1, parentKotId: 1 }); // For querying KOT history
