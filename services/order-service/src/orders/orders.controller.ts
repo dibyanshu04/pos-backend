@@ -25,6 +25,8 @@ import { VoidBillDto } from './dto/void-bill.dto';
 import { MarkComplimentaryDto } from './dto/complimentary-item.dto';
 import { SettleCreditDto } from './dto/settle-credit.dto';
 
+type AuthenticatedRequest = ExpressRequest & { user?: { userId?: string } };
+
 @Controller('orders')
 export class OrdersController {
   constructor(private readonly ordersService: OrdersService) {}
@@ -111,7 +113,7 @@ export class OrdersController {
   async fireCourse(
     @Param('orderId') orderId: string,
     @Body() fireCourseDto: FireCourseDto,
-    @Request() req: any, // TODO: Replace with proper user decorator
+    @Req() req: AuthenticatedRequest, // TODO: Replace with proper user decorator
   ): Promise<SuccessResponseDto<any>> {
     // TODO: Extract userId from JWT token when auth is implemented
     const userId = req.user?.userId || 'system'; // Temporary fallback
@@ -182,7 +184,7 @@ export class OrdersController {
   async voidBill(
     @Param('orderId') orderId: string,
     @Body() voidBillDto: VoidBillDto,
-    @Request() req: any, // TODO: Replace with proper user decorator
+    @Req() req: AuthenticatedRequest, // TODO: Replace with proper user decorator
   ): Promise<SuccessResponseDto<any>> {
     // TODO: Extract userId from JWT token when auth is implemented
     // TODO: Add RBAC guard (OWNER, MANAGER only)
@@ -201,7 +203,7 @@ export class OrdersController {
   async markItemComplimentary(
     @Param('orderItemId') orderItemId: string,
     @Body() markComplimentaryDto: MarkComplimentaryDto,
-    @Request() req: any, // TODO: Replace with proper user decorator
+    @Req() req: AuthenticatedRequest, // TODO: Replace with proper user decorator
   ): Promise<SuccessResponseDto<any>> {
     // TODO: Extract userId from JWT token when auth is implemented
     // TODO: Add RBAC guard (OWNER, MANAGER, optionally CASHIER)
