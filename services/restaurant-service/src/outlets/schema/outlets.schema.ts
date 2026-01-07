@@ -86,6 +86,33 @@ export class Outlet {
 
   @Prop()
   managerContact: string;
+
+  // Billing Configuration (Round-off settings)
+  @Prop({
+    type: {
+      roundOff: {
+        enabled: { type: Boolean, default: true },
+        method: {
+          type: String,
+          enum: ['NEAREST', 'UP', 'DOWN'],
+          default: 'NEAREST',
+        },
+        precision: {
+          type: Number,
+          enum: [0.05, 0.1, 1.0],
+          default: 0.05,
+        },
+      },
+    },
+    required: false,
+  })
+  billingConfig?: {
+    roundOff: {
+      enabled: boolean;
+      method: 'NEAREST' | 'UP' | 'DOWN';
+      precision: 0.05 | 0.1 | 1.0;
+    };
+  };
 }
 
 export const OutletSchema = SchemaFactory.createForClass(Outlet);

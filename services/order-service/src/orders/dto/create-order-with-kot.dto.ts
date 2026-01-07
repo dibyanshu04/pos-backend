@@ -50,6 +50,13 @@ export class OrderItemInputDto {
   @Type(() => RecipeComponentDto)
   @ArrayMinSize(1)
   recipeSnapshot: RecipeComponentDto[];
+
+  @IsOptional()
+  isComplimentary?: boolean; // Mark item as complimentary (requires RBAC)
+
+  @IsString()
+  @IsOptional()
+  complimentaryReason?: string; // Reason for complimentary (required if isComplimentary = true)
 }
 
 export class CreateOrderWithKotDto {

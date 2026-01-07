@@ -57,6 +57,23 @@ export class OrderItem {
     unit: string;
   }[];
 
+  // Complimentary Item (Petpooja style - NOT a discount)
+  @Prop({ type: Boolean, default: false, index: true })
+  isComplimentary: boolean; // If true, item is free (marketing expense, not revenue reduction)
+
+  @Prop({ type: String })
+  complimentaryReason?: string; // Reason for complimentary (mandatory if isComplimentary = true)
+
+  // Tax and taxable amounts (snapshot for complimentary items)
+  @Prop({ type: Number, default: 0, min: 0 })
+  taxableAmount: number; // Taxable amount (must be 0 for complimentary items)
+
+  @Prop({ type: Number, default: 0, min: 0 })
+  taxAmount: number; // Tax amount (must be 0 for complimentary items)
+
+  @Prop({ type: Number, default: 0, min: 0 })
+  finalItemTotal: number; // Final item total (must be 0 for complimentary items)
+
   // Special Instructions
   @Prop({ type: String })
   specialInstructions?: string; // Customer special instructions for this item

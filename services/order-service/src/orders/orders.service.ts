@@ -49,6 +49,13 @@ import {
   EnhancedKitchenResolutionInput,
   resolveKitchenForItemEnhanced,
 } from './utils/kitchen-resolution.util';
+import { VoidBillDto, VoidBillResponseDto } from './dto/void-bill.dto';
+import { SettleCreditDto } from './dto/settle-credit.dto';
+import {
+  calculateRoundOff,
+  getDefaultRoundOffConfig,
+} from './utils/round-off.util';
+import { RestaurantServiceClient } from './services/restaurant-service.client';
 
 @Injectable()
 export class OrdersService {
@@ -68,6 +75,7 @@ export class OrdersService {
     private posSessionService: PosSessionService,
     private kitchenService: KitchenService,
     private coursesService: CoursesService,
+    private restaurantServiceClient: RestaurantServiceClient,
   ) {}
 
   async create(createOrderDto: CreateOrderDto): Promise<Order> {
@@ -687,23 +695,37 @@ export class OrdersService {
       const savedOrder = await order.save({ session });
 
       // Step 5: Create OrderItems with kitchenId and courseId (snapshot)
-      const orderItems = orderItemsData.map((itemData) => ({
-        orderId: savedOrder._id,
-        menuItemId: itemData.menuItemId,
-        variantId: itemData.variantId,
-        itemName: itemData.itemName,
-        variantName: itemData.variantName,
-        price: itemData.price,
-        quantity: itemData.quantity,
-        totalPrice: itemData.totalPrice,
-        specialInstructions: itemData.specialInstructions,
-        recipeSnapshot: itemData.recipeSnapshot,
-        kitchenId: itemData.kitchenId, // Store kitchen assignment
-        courseId: itemData.courseId, // Store course assignment (snapshot)
-        courseName: itemData.courseName, // Store course name (snapshot)
-        courseSequence: itemData.courseSequence, // Store course sequence (snapshot)
-        itemStatus: 'PENDING' as const, // Will be updated to PRINTED when KOT is printed
-      }));
+      // Also handle complimentary items from order creation
+      const orderItems = createOrderDto.items.map((itemInput, index) => {
+        const itemData = orderItemsData[index];
+        const isComplimentary = itemInput.isComplimentary || false;
+
+        return {
+          orderId: savedOrder._id,
+          menuItemId: itemData.menuItemId,
+          variantId: itemData.variantId,
+          itemName: itemData.itemName,
+          variantName: itemData.variantName,
+          price: isComplimentary ? 0 : itemData.price, // Set price to 0 if complimentary
+          quantity: itemData.quantity,
+          totalPrice: isComplimentary ? 0 : itemData.totalPrice, // Set totalPrice to 0 if complimentary
+          specialInstructions: itemData.specialInstructions,
+          recipeSnapshot: itemData.recipeSnapshot,
+          kitchenId: itemData.kitchenId, // Store kitchen assignment
+          courseId: itemData.courseId, // Store course assignment (snapshot)
+          courseName: itemData.courseName, // Store course name (snapshot)
+          courseSequence: itemData.courseSequence, // Store course sequence (snapshot)
+          itemStatus: 'PENDING' as const, // Will be updated to PRINTED when KOT is printed
+          // Complimentary item fields
+          isComplimentary,
+          complimentaryReason: isComplimentary
+            ? itemInput.complimentaryReason || 'Complimentary item'
+            : undefined,
+          taxableAmount: isComplimentary ? 0 : itemData.totalPrice,
+          taxAmount: 0, // Will be calculated during billing
+          finalItemTotal: isComplimentary ? 0 : itemData.totalPrice,
+        };
+      });
 
       const savedOrderItems = await this.orderItemModel.insertMany(
         orderItems,
@@ -1277,13 +1299,23 @@ export class OrdersService {
         .session(session)
         .exec();
 
-      // Step 5: Calculate subtotal from all items
-      const subtotal = allOrderItems.reduce(
-        (sum, item) => sum + item.totalPrice,
-        0,
-      );
+      // Step 5: Calculate subtotal from non-complimentary items only
+      // Complimentary items have zero value and zero tax
+      const subtotal = allOrderItems
+        .filter((item) => !item.isComplimentary)
+        .reduce((sum, item) => sum + item.totalPrice, 0);
 
-      // Step 6: Get tax configuration and calculate taxes
+      // Calculate total complimentary items value (for reporting)
+      const totalComplimentaryItemsValue = allOrderItems
+        .filter((item) => item.isComplimentary)
+        .reduce((sum, item) => {
+          // Use original price before making complimentary
+          const originalPrice = item.price || 0;
+          const originalQuantity = item.quantity || 0;
+          return sum + originalPrice * originalQuantity;
+        }, 0);
+
+      // Step 6: Get tax configuration and calculate taxes (only on non-complimentary items)
       const taxConfig = await this.taxConfigService.getTaxConfig(
         existingOrder.restaurantId,
       );
@@ -1303,49 +1335,59 @@ export class OrdersService {
           : existingOrder.discount;
       const discountReason = generateBillDto.discountReason;
 
-      // Step 8: Calculate grand total
-      const grandTotal = subtotal + totalTax - discount;
+      // Step 8: Calculate gross amount (before round-off)
+      const grossAmount = subtotal + totalTax - discount;
 
-      // Step 9: Generate bill number
+      // Step 9: Apply round-off (Indian billing - Petpooja style)
+      // Get outlet billing config (get outletId from POS session or KOTs)
+      let outletId: string | undefined;
+      if (existingOrder.posSessionId) {
+        const posSession = await this.posSessionService.findOne(
+          existingOrder.posSessionId.toString(),
+        );
+        outletId = posSession?.outletId;
+      }
+
+      let billingConfig;
+      if (outletId) {
+        billingConfig = await this.restaurantServiceClient.getOutletBillingConfig(
+          outletId,
+        );
+      }
+
+      // Use default config if not available
+      const roundOffConfig = billingConfig?.roundOff || getDefaultRoundOffConfig();
+
+      const roundOffResult = calculateRoundOff(grossAmount, roundOffConfig);
+
+      // Step 10: Generate bill number
       const billNumber = await this.generateBillNumber(
         existingOrder.restaurantId,
         session,
       );
 
-      // Step 10: Update Order status to BILLED (only if no unprinted items)
+      // Step 11: Update Order status to BILLED (only if no unprinted items)
+      const updateData: any = {
+        billNumber,
+        subtotal,
+        tax: totalTax,
+        discount,
+        total: roundOffResult.grossAmount, // Keep for backward compatibility
+        grossAmount: roundOffResult.grossAmount,
+        roundOffAmount: roundOffResult.roundOffAmount,
+        netPayable: roundOffResult.netPayable,
+        billedAt: new Date(),
+      };
+
       if (!hasUnprintedItems) {
-        await this.orderModel.findByIdAndUpdate(
-          existingOrder._id,
-          {
-            $set: {
-              status: 'BILLED',
-              billNumber,
-              subtotal,
-              tax: totalTax,
-              discount,
-              total: grandTotal,
-              billedAt: new Date(),
-            },
-          },
-          { session, new: true },
-        );
-      } else {
-        // If there are unprinted items, still update financials but keep status as is
-        await this.orderModel.findByIdAndUpdate(
-          existingOrder._id,
-          {
-            $set: {
-              billNumber,
-              subtotal,
-              tax: totalTax,
-              discount,
-              total: grandTotal,
-              billedAt: new Date(),
-            },
-          },
-          { session, new: true },
-        );
+        updateData.status = 'BILLED';
       }
+
+      await this.orderModel.findByIdAndUpdate(
+        existingOrder._id,
+        { $set: updateData },
+        { session, new: true },
+      );
 
       // Step 11: Commit transaction
       await session.commitTransaction();
@@ -1358,7 +1400,7 @@ export class OrdersService {
         );
       }
 
-      // Step 13: Format bill response
+      // Step 12: Format bill response
       const billItems: BillItemDto[] = allOrderItems.map((item) => ({
         orderItemId: item._id.toString(),
         menuItemId: item.menuItemId,
@@ -1368,6 +1410,8 @@ export class OrdersService {
         price: item.price,
         totalPrice: item.totalPrice,
         specialInstructions: item.specialInstructions,
+        isComplimentary: item.isComplimentary || false,
+        complimentaryReason: item.complimentaryReason,
       }));
 
       const billTaxes: BillTaxDto[] = taxBreakdowns.map((tax) => ({
@@ -1391,7 +1435,11 @@ export class OrdersService {
         totalTax,
         discount,
         discountReason,
-        grandTotal,
+        grossAmount: roundOffResult.grossAmount,
+        roundOffAmount: roundOffResult.roundOffAmount,
+        netPayable: roundOffResult.netPayable,
+        grandTotal: roundOffResult.netPayable, // Use netPayable for backward compatibility
+        totalComplimentaryItemsValue,
         orderType: existingOrder.orderType,
         status: hasUnprintedItems ? existingOrder.status : 'BILLED',
         billedAt: new Date(),
@@ -1467,7 +1515,8 @@ export class OrdersService {
       }
 
       // Step 4: Validation - Ensure paidAmount matches the billTotal
-      const billTotal = existingOrder.total;
+      // Use netPayable if available (after round-off), otherwise use total
+      const billTotal = existingOrder.netPayable || existingOrder.total;
       const paidAmount = settleOrderDto.amount;
 
       if (Math.abs(paidAmount - billTotal) > 0.01) {
@@ -1494,6 +1543,15 @@ export class OrdersService {
         notes: settleOrderDto.notes,
         completedAt: new Date(),
       };
+
+      // If payment method is CREDIT, add credit details
+      if (settleOrderDto.paymentMethod === 'CREDIT') {
+        paymentData.creditDetails = {
+          customerName: existingOrder.customerPhone || 'Unknown Customer',
+          customerPhone: existingOrder.customerPhone,
+          isSettled: false,
+        };
+      }
 
       // Attach POS session ID if order has one
       if (existingOrder.posSessionId) {
@@ -2305,6 +2363,315 @@ export class OrdersService {
           createdAt: course.createdAt,
           updatedAt: course.updatedAt,
         },
+      };
+    } catch (error) {
+      await session.abortTransaction();
+      throw error;
+    } finally {
+      session.endSession();
+    }
+  }
+
+  /**
+   * Mark Order Item as Complimentary (Petpooja style)
+   * Complimentary items have zero value, zero tax, but appear on bill
+   */
+  async markItemComplimentary(
+    orderItemId: string,
+    reason: string,
+    userId: string, // TODO: Extract from JWT token
+  ): Promise<any> {
+    const session = await this.connection.startSession();
+    session.startTransaction();
+
+    try {
+      // Step 1: Find order item
+      const orderItem = await this.orderItemModel
+        .findById(orderItemId)
+        .session(session)
+        .exec();
+
+      if (!orderItem) {
+        throw new NotFoundException(`Order item with ID ${orderItemId} not found`);
+      }
+
+      // Step 2: Find order
+      const order = await this.orderModel
+        .findById(orderItem.orderId)
+        .session(session)
+        .exec();
+
+      if (!order) {
+        throw new NotFoundException(`Order not found`);
+      }
+
+      // Step 3: Validate - cannot mark complimentary after bill is generated
+      if (order.status === 'BILLED' || order.status === 'COMPLETED') {
+        throw new BadRequestException(
+          'Cannot mark item as complimentary after bill is generated',
+        );
+      }
+
+      // Step 4: Update order item to be complimentary
+      orderItem.isComplimentary = true;
+      orderItem.complimentaryReason = reason;
+      orderItem.price = 0;
+      orderItem.totalPrice = 0;
+      orderItem.taxableAmount = 0;
+      orderItem.taxAmount = 0;
+      orderItem.finalItemTotal = 0;
+
+      await orderItem.save({ session });
+
+      // Step 5: Recalculate order totals (excluding complimentary items)
+      const allItems = await this.orderItemModel
+        .find({ orderId: order._id })
+        .session(session)
+        .exec();
+
+      const subtotal = allItems
+        .filter((item) => !item.isComplimentary)
+        .reduce((sum, item) => sum + item.totalPrice, 0);
+
+      // Recalculate tax on non-complimentary items only
+      const taxConfig = await this.taxConfigService.getTaxConfig(
+        order.restaurantId,
+      );
+      const taxBreakdowns = this.taxConfigService.calculateTaxes(
+        subtotal,
+        taxConfig,
+      );
+      const totalTax = taxBreakdowns.reduce(
+        (sum, tax) => sum + tax.amount,
+        0,
+      );
+
+      // Update order totals
+      order.subtotal = subtotal;
+      order.tax = totalTax;
+      order.total = subtotal + totalTax - order.discount;
+      await order.save({ session });
+
+      await session.commitTransaction();
+
+      return {
+        orderItemId: orderItem._id.toString(),
+        isComplimentary: true,
+        complimentaryReason: reason,
+      };
+    } catch (error) {
+      await session.abortTransaction();
+      throw error;
+    } finally {
+      session.endSession();
+    }
+  }
+
+  /**
+   * Void Bill (Petpooja style - bills are NEVER deleted, only voided)
+   * Voided bills have no revenue, no GST, but remain in system for audit
+   */
+  async voidBill(
+    orderId: string,
+    reason: string,
+    userId: string, // TODO: Extract from JWT token
+  ): Promise<any> {
+    const session = await this.connection.startSession();
+    session.startTransaction();
+
+    try {
+      // Step 1: Find order
+      const order = await this.orderModel
+        .findById(orderId)
+        .session(session)
+        .exec();
+
+      if (!order) {
+        throw new NotFoundException(`Order with ID ${orderId} not found`);
+      }
+
+      // Step 2: Validate - bill must exist
+      if (!order.billNumber) {
+        throw new BadRequestException(
+          'Cannot void order that has not been billed',
+        );
+      }
+
+      // Step 3: Validate - bill must NOT already be voided
+      if (order.isVoided) {
+        throw new BadRequestException('Bill is already voided');
+      }
+
+      // Step 4: Validate - Z-Report must NOT be generated
+      if (order.posSessionId) {
+        const posSession = await this.posSessionService.findOne(
+          order.posSessionId.toString(),
+        );
+        if (posSession?.zReportId) {
+          throw new BadRequestException(
+            'Cannot void bill. Z-Report has been generated for this session.',
+          );
+        }
+      }
+
+      // Step 5: Validate payments - must refund or mark invalid
+      const existingPayments = await this.paymentModel
+        .find({ orderId: order._id, status: 'COMPLETED' })
+        .session(session)
+        .exec();
+
+      if (existingPayments.length > 0) {
+        // Mark all payments as REFUNDED
+        for (const payment of existingPayments) {
+          payment.status = 'REFUNDED';
+          payment.refundedAt = new Date();
+          payment.refundReason = `Bill voided: ${reason}`;
+          await payment.save({ session });
+        }
+      }
+
+      // Step 6: Void the bill
+      const originalBillAmount = order.netPayable || order.total;
+      order.isVoided = true;
+      order.voidedAt = new Date();
+      order.voidedByUserId = userId;
+      order.voidReason = reason;
+      order.originalBillAmount = originalBillAmount;
+      order.status = 'VOIDED';
+
+      // Set all financials to zero (for voided bill)
+      order.netPayable = 0;
+      order.grossAmount = originalBillAmount; // Keep original for audit
+      order.total = 0;
+      order.tax = 0;
+
+      await order.save({ session });
+
+      // Step 7: Update POS session totals (if session exists)
+      if (order.posSessionId) {
+        // TODO: Recalculate session totals excluding voided bills
+        // This should be handled in POS session service
+      }
+
+      await session.commitTransaction();
+
+      return {
+        orderId: order._id.toString(),
+        billNumber: order.billNumber,
+        voidedAt: order.voidedAt,
+        voidedByUserId: userId,
+        voidReason: reason,
+        originalBillAmount,
+        status: 'VOIDED',
+      };
+    } catch (error) {
+      await session.abortTransaction();
+      throw error;
+    } finally {
+      session.endSession();
+    }
+  }
+
+  /**
+   * Settle Credit Bill Later (Petpooja style)
+   * Creates a new payment record to settle an existing credit payment
+   */
+  async settleCredit(
+    paymentId: string,
+    settleCreditDto: any, // SettleCreditDto
+    userId: string, // TODO: Extract from JWT token
+  ): Promise<any> {
+    const session = await this.connection.startSession();
+    session.startTransaction();
+
+    try {
+      // Step 1: Find original credit payment
+      const originalPayment = await this.paymentModel
+        .findById(paymentId)
+        .session(session)
+        .exec();
+
+      if (!originalPayment) {
+        throw new NotFoundException(`Payment with ID ${paymentId} not found`);
+      }
+
+      // Step 2: Validate - must be a CREDIT payment
+      if (originalPayment.paymentMethod !== 'CREDIT') {
+        throw new BadRequestException(
+          'Payment is not a credit payment. Only credit payments can be settled.',
+        );
+      }
+
+      // Step 3: Validate - credit must not already be settled
+      if (originalPayment.creditDetails?.isSettled) {
+        throw new BadRequestException('Credit bill has already been settled');
+      }
+
+      // Step 4: Validate - settlement amount must match outstanding amount
+      if (Math.abs(settleCreditDto.amount - originalPayment.amount) > 0.01) {
+        throw new BadRequestException(
+          `Settlement amount (${settleCreditDto.amount}) does not match outstanding credit amount (${originalPayment.amount})`,
+        );
+      }
+
+      // Step 5: Find order
+      const order = await this.orderModel
+        .findById(originalPayment.orderId)
+        .session(session)
+        .exec();
+
+      if (!order) {
+        throw new NotFoundException('Order not found');
+      }
+
+      // Step 6: Create settlement payment
+      const settlementPayment = new this.paymentModel({
+        orderId: order._id,
+        restaurantId: order.restaurantId,
+        posSessionId: order.posSessionId,
+        paymentMethod: settleCreditDto.method,
+        amount: settleCreditDto.amount,
+        status: 'COMPLETED',
+        transactionId: settleCreditDto.transactionId,
+        referenceNumber: settleCreditDto.referenceNumber,
+        notes: settleCreditDto.notes || `Settlement of credit payment ${paymentId}`,
+        completedAt: new Date(),
+        processedBy: userId,
+      });
+
+      const savedSettlementPayment = await settlementPayment.save({ session });
+
+      // Step 7: Update original credit payment
+      if (!originalPayment.creditDetails) {
+        originalPayment.creditDetails = {
+          customerName: order.customerPhone || 'Unknown',
+          isSettled: false,
+        };
+      }
+
+      originalPayment.creditDetails.isSettled = true;
+      originalPayment.creditDetails.settledAt = new Date();
+      originalPayment.creditDetails.originalPaymentId = originalPayment._id;
+      originalPayment.creditDetails.settledPaymentId = savedSettlementPayment._id;
+
+      await originalPayment.save({ session });
+
+      // Step 8: Update POS session totals (if session exists)
+      if (order.posSessionId) {
+        // TODO: Update POS session to reflect credit settlement
+        // This should update credit metrics in session
+      }
+
+      await session.commitTransaction();
+
+      return {
+        paymentId: originalPayment._id.toString(),
+        originalCreditPaymentId: originalPayment._id.toString(),
+        orderId: order._id.toString(),
+        settlementPaymentId: savedSettlementPayment._id.toString(),
+        amount: settleCreditDto.amount,
+        method: settleCreditDto.method,
+        settledAt: new Date(),
       };
     } catch (error) {
       await session.abortTransaction();

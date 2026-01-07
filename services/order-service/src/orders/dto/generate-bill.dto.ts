@@ -24,6 +24,8 @@ export class BillItemDto {
   price: number;
   totalPrice: number;
   specialInstructions?: string;
+  isComplimentary?: boolean;
+  complimentaryReason?: string;
 }
 
 export class BillTaxDto {
@@ -47,10 +49,14 @@ export class BillResponseDto {
   totalTax: number;
   discount: number;
   discountReason?: string;
-  grandTotal: number;
+  grossAmount?: number; // Gross amount before round-off
+  roundOffAmount?: number; // Round-off adjustment
+  netPayable?: number; // Final payable amount after round-off
+  grandTotal: number; // DEPRECATED: use netPayable
   orderType: string;
   status: string;
   billedAt: Date;
   hasUnprintedItems: boolean;
   unprintedItemsWarning?: string;
+  totalComplimentaryItemsValue?: number; // Total value of complimentary items (for reporting)
 }
