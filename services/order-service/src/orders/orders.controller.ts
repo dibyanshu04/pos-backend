@@ -8,6 +8,7 @@ import {
   Param,
   HttpCode,
   HttpStatus,
+  Req,
 } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -19,7 +20,7 @@ import { SettleOrderDto } from './dto/settle-order.dto';
 import { CreateDraftDto } from './dto/create-draft.dto';
 import { SuccessResponseDto } from './dto/success-response.dto';
 import { FireCourseDto } from '../courses/dto/fire-course.dto';
-import { Request } from 'express';
+import type { Request as ExpressRequest } from 'express';
 import { VoidBillDto } from './dto/void-bill.dto';
 import { MarkComplimentaryDto } from './dto/complimentary-item.dto';
 import { SettleCreditDto } from './dto/settle-credit.dto';
