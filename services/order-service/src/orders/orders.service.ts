@@ -56,6 +56,8 @@ import {
   getDefaultRoundOffConfig,
 } from './utils/round-off.util';
 import { RestaurantServiceClient } from './services/restaurant-service.client';
+import { FireCourseDto } from '../courses/dto/fire-course.dto';
+import { CourseResponseDto } from '../courses/dto/course-response.dto';
 
 @Injectable()
 export class OrdersService {
@@ -286,7 +288,8 @@ export class OrdersService {
       const tableId = new Types.ObjectId(createDraftDto.tableId);
 
       // Step 7: Determine order type
-      const orderType = createDraftDto.orderType || 'DINE_IN';
+      const orderType: Order['orderType'] =
+        createDraftDto.orderType === 'TAKEAWAY' ? 'TAKEAWAY' : 'DINE_IN';
 
       // Step 8: Handle create or update logic
       let savedOrder: OrderDocument;
@@ -762,14 +765,14 @@ export class OrdersService {
 
       savedOrderItems.forEach((orderItem, index) => {
         const itemData = orderItemsData[index];
-        const groupKey = `${orderItem.kitchenId.toString()}_${orderItem.courseId.toString()}`;
-        const courseInfo = coursesMap.get(orderItem.courseId.toString());
+        const groupKey = `${orderItem.kitchenId!.toString()}_${orderItem.courseId!.toString()}`;
+        const courseInfo = coursesMap.get(orderItem.courseId!.toString());
 
         if (!itemsByKitchenAndCourse.has(groupKey)) {
           itemsByKitchenAndCourse.set(groupKey, {
-            kitchenId: orderItem.kitchenId,
+            kitchenId: orderItem.kitchenId!,
             kitchenName: itemData.kitchenName,
-            courseId: orderItem.courseId,
+            courseId: orderItem.courseId!,
             courseName: itemData.courseName,
             courseCode: courseInfo?.code || 'UNKNOWN',
             courseSequence: itemData.courseSequence,
@@ -875,6 +878,14 @@ export class OrdersService {
         printedAt: savedKot.printedAt,
         printedBy: savedKot.printedBy,
         notes: savedKot.notes,
+        type: savedKot.type,
+        parentKotId: savedKot.parentKotId?.toString(),
+        actionReason: savedKot.actionReason,
+        cancelledAt: savedKot.cancelledAt,
+        cancelledByUserId: savedKot.cancelledByUserId,
+        courseId: savedKot.courseId?.toString(),
+        courseName: savedKot.courseName,
+        courseSequence: savedKot.courseSequence,
       }));
 
       return {
@@ -1202,6 +1213,14 @@ export class OrdersService {
         printedAt: savedKot.printedAt,
         printedBy: savedKot.printedBy,
         notes: savedKot.notes,
+        type: savedKot.type,
+        parentKotId: savedKot.parentKotId?.toString(),
+        actionReason: savedKot.actionReason,
+        cancelledAt: savedKot.cancelledAt,
+        cancelledByUserId: savedKot.cancelledByUserId,
+        courseId: savedKot.courseId?.toString(),
+        courseName: savedKot.courseName,
+        courseSequence: savedKot.courseSequence,
       }));
 
       return {
@@ -1749,65 +1768,6 @@ export class OrdersService {
     return this.toKotResponseDto(kot);
   }
 
-  /**
-   * Reprint KOT
-   */
-  async reprintKot(kotId: string, printedBy?: string): Promise<KotResponseDto> {
-    const kot = await this.kotModel.findById(kotId).exec();
-
-    if (!kot) {
-      throw new NotFoundException(`KOT with ID ${kotId} not found`);
-    }
-
-    // Update printed timestamp (reprint)
-    kot.printedAt = new Date();
-    if (printedBy) {
-      kot.printedBy = printedBy;
-    }
-
-    const updatedKot = await kot.save();
-    return this.toKotResponseDto(updatedKot);
-  }
-
-  /**
-   * Cancel KOT
-   */
-  async cancelKot(kotId: string, cancelledBy?: string): Promise<KotResponseDto> {
-    const kot = await this.kotModel.findById(kotId).exec();
-
-    if (!kot) {
-      throw new NotFoundException(`KOT with ID ${kotId} not found`);
-    }
-
-    if (kot.status === 'CANCELLED') {
-      throw new BadRequestException('KOT is already cancelled');
-    }
-
-    kot.status = 'CANCELLED';
-    kot.cancelledAt = new Date();
-    if (cancelledBy) {
-      // Store cancelledBy if needed (could add field to schema)
-    }
-
-    const updatedKot = await kot.save();
-
-    // Update order items status to CANCELLED
-    await this.orderItemModel.updateMany(
-      { kotId: kot._id },
-      {
-        $set: {
-          itemStatus: 'CANCELLED',
-          cancelledAt: new Date(),
-        },
-      },
-    );
-
-    return this.toKotResponseDto(updatedKot);
-  }
-
-  /**
-   * Convert KOT document to response DTO
-   */
   private toKotResponseDto(kot: KotDocument): KotResponseDto {
     return {
       kotId: kot._id.toString(),
@@ -1839,6 +1799,10 @@ export class OrdersService {
       courseName: kot.courseName,
       courseSequence: kot.courseSequence,
     };
+  }
+
+  private toPlainKotItem(item: any) {
+    return typeof item?.toObject === 'function' ? item.toObject() : item;
   }
 
   /**
@@ -1895,7 +1859,7 @@ export class OrdersService {
         tableId: originalKot.tableId,
         kotNumber: originalKot.kotNumber, // Same kotNumber
         items: originalKot.items.map((item) => ({
-          ...item.toObject(),
+          ...this.toPlainKotItem(item),
           status: 'ACTIVE', // All items remain ACTIVE in reprint
         })),
         type: 'REPRINT',
@@ -1983,7 +1947,7 @@ export class OrdersService {
           // Check if item is already cancelled or transferred
           if (kotItem.status === 'CANCELLED' || kotItem.status === 'TRANSFERRED') {
             throw new BadRequestException(
-              `Item ${cancelItem.menuItemId} is already ${kotItem.status.toLowerCase()}`,
+              `Item ${cancelItem.orderItemId} is already ${kotItem.status.toLowerCase()}`,
             );
           }
 
@@ -1995,7 +1959,7 @@ export class OrdersService {
           }
 
           itemsToCancel.push({
-            ...kotItem.toObject(),
+            ...this.toPlainKotItem(kotItem),
             quantity: cancelItem.quantity,
             status: 'CANCELLED',
           });
@@ -2003,7 +1967,7 @@ export class OrdersService {
       } else {
         // Full cancellation - cancel all items
         itemsToCancel = originalKot.items.map((item) => ({
-          ...item.toObject(),
+          ...this.toPlainKotItem(item),
           status: 'CANCELLED',
         }));
       }
@@ -2135,7 +2099,7 @@ export class OrdersService {
         // Check if item is already cancelled or transferred
         if (kotItem.status === 'CANCELLED' || kotItem.status === 'TRANSFERRED') {
           throw new BadRequestException(
-            `Item ${transferItem.menuItemId} is already ${kotItem.status.toLowerCase()}`,
+            `Item ${transferItem.orderItemId} is already ${kotItem.status.toLowerCase()}`,
           );
         }
 
@@ -2148,14 +2112,14 @@ export class OrdersService {
 
         // Add to cancellation list (source kitchen)
         itemsToCancel.push({
-          ...kotItem.toObject(),
+          ...this.toPlainKotItem(kotItem),
           quantity: transferItem.quantity,
           status: 'TRANSFERRED',
         });
 
         // Add to transfer list (destination kitchen)
         itemsToTransfer.push({
-          ...kotItem.toObject(),
+          ...this.toPlainKotItem(kotItem),
           quantity: transferItem.quantity,
           status: 'ACTIVE',
         });
