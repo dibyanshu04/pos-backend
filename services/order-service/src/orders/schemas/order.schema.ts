@@ -9,6 +9,10 @@ export class Order {
   @Prop({ required: true, type: String, index: true })
   restaurantId: string; // Reference to restaurant-service
 
+  // Outlet Reference
+  @Prop({ type: String, index: true })
+  outletId?: string; // Reference to outlet
+
   @Prop({ type: Types.ObjectId, ref: 'Table', index: true })
   tableId?: Types.ObjectId; // Reference to restaurant-service table module
 

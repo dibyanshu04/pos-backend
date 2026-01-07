@@ -5,8 +5,29 @@ import {
   IsArray,
   ValidateNested,
   IsEnum,
+  IsNotEmpty,
+  Min,
+  ArrayMinSize,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+
+class RecipeComponentDto {
+  @IsString()
+  @IsNotEmpty()
+  rawMaterialId: string;
+
+  @IsString()
+  @IsNotEmpty()
+  rawMaterialName: string;
+
+  @IsNumber()
+  @Min(0.000001)
+  quantityPerUnit: number;
+
+  @IsString()
+  @IsNotEmpty()
+  unit: string;
+}
 
 class OrderItemDto {
   @IsString()
@@ -20,6 +41,12 @@ class OrderItemDto {
 
   @IsNumber()
   gstRate: number;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RecipeComponentDto)
+  @ArrayMinSize(1)
+  recipeSnapshot: RecipeComponentDto[];
 }
 
 class CustomerDto {

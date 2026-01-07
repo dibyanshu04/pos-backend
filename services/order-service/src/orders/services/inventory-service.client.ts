@@ -1,46 +1,65 @@
-import { Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  InternalServerErrorException,
+} from '@nestjs/common';
+import axios, { AxiosInstance } from 'axios';
 
-export interface InventoryDeductionItem {
-  menuItemId: string;
-  variantId?: string;
-  quantity: number;
+export interface InventoryRecipeComponent {
+  rawMaterialId: string;
+  rawMaterialName: string;
+  quantityPerUnit: number;
+  unit: string;
 }
 
-/**
- * Mock InventoryService Client
- * In production, this would make HTTP calls to inventory-service
- * or use a service mesh/gRPC for inter-service communication
- */
+export interface InventoryConsumptionItem {
+  menuItemId: string;
+  menuItemName: string;
+  quantityOrdered: number;
+  recipeSnapshot: InventoryRecipeComponent[];
+}
+
+export interface InventoryConsumptionPayload {
+  orderId: string;
+  restaurantId: string;
+  outletId: string;
+  items: InventoryConsumptionItem[];
+}
+
 @Injectable()
 export class InventoryServiceClient {
-  /**
-   * Mock: Deduct stock based on items sold
-   * @param restaurantId - Restaurant ID
-   * @param items - Array of items with quantities to deduct
-   * @returns Promise<void>
-   */
-  async deductStock(
-    restaurantId: string,
-    items: InventoryDeductionItem[],
-  ): Promise<void> {
-    // TODO: Replace with actual HTTP call to inventory-service
-    // Example: POST /inventory-service/stock/deduct
-    // Body: { restaurantId, items: [{ menuItemId, variantId, quantity }] }
-    console.log(
-      `[MOCK] Deducting stock for restaurant ${restaurantId}`,
-      items,
-    );
+  private readonly client: AxiosInstance;
 
-    // Mock: In production, make actual API call
-    // await this.httpService.post('/stock/deduct', {
-    //   restaurantId,
-    //   items: items.map(item => ({
-    //     menuItemId: item.menuItemId,
-    //     variantId: item.variantId,
-    //     quantity: item.quantity,
-    //   }))
-    // });
+  constructor() {
+    this.client = axios.create({
+      baseURL: process.env.INVENTORY_SERVICE_URL || 'http://localhost:3005',
+      timeout: 10_000,
+    });
+  }
 
-    return Promise.resolve();
+  async consumeInventory(
+    payload: InventoryConsumptionPayload,
+  ): Promise<{ ledgerEntryIds?: string[] }> {
+    try {
+      const response = await this.client.post(
+        '/internal/inventory/consume',
+        payload,
+        {
+          headers: {
+            'x-internal-token': process.env.INVENTORY_INTERNAL_TOKEN || '',
+          },
+        },
+      );
+      return response.data;
+    } catch (error: any) {
+      if (error.response?.data) {
+        const message =
+          error.response.data?.message || 'Inventory consumption failed';
+        throw new BadRequestException(message);
+      }
+      throw new InternalServerErrorException(
+        'Inventory service is unavailable. Please retry.',
+      );
+    }
   }
 }

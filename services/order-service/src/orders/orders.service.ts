@@ -4,6 +4,7 @@ import {
   NotFoundException,
   BadRequestException,
   Inject,
+  Logger,
 } from '@nestjs/common';
 import { InjectModel, InjectConnection } from '@nestjs/mongoose';
 import { Model, Connection, ClientSession } from 'mongoose';
@@ -43,9 +44,16 @@ import {
   PosSessionDocument,
 } from '../pos-session/pos-session.service';
 import { KitchenService } from '../kitchen/kitchen.service';
+import { CoursesService } from '../courses/courses.service';
+import {
+  EnhancedKitchenResolutionInput,
+  resolveKitchenForItemEnhanced,
+} from './utils/kitchen-resolution.util';
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
+
   constructor(
     @InjectModel(Order.name) private orderModel: Model<OrderDocument>,
     @InjectModel(OrderItem.name)
@@ -556,6 +564,12 @@ export class OrdersService {
       // Course Priority: item-level > category-level > default course
       const orderItemsData = await Promise.all(
         createOrderDto.items.map(async (item, index) => {
+          if (!item.recipeSnapshot || item.recipeSnapshot.length === 0) {
+            throw new BadRequestException(
+              `Missing recipe snapshot for menu item ${item.menuItemId}`,
+            );
+          }
+
           const validatedItem = validatedItems[index];
           const totalPrice = validatedItem.price * item.quantity;
 
@@ -628,6 +642,7 @@ export class OrdersService {
             quantity: item.quantity,
             totalPrice,
             specialInstructions: item.specialInstructions,
+            recipeSnapshot: item.recipeSnapshot,
             kitchenId: new Types.ObjectId(resolvedKitchen.kitchenId),
             kitchenName: kitchen.name,
             courseId,
@@ -652,6 +667,7 @@ export class OrdersService {
       const tableId = new Types.ObjectId(createOrderDto.tableId);
       const orderData = {
         restaurantId: createOrderDto.restaurantId,
+        outletId: createOrderDto.outletId,
         tableId,
         waiterId: createOrderDto.waiterId,
         customerPhone: createOrderDto.customerPhone,
@@ -681,6 +697,7 @@ export class OrdersService {
         quantity: itemData.quantity,
         totalPrice: itemData.totalPrice,
         specialInstructions: itemData.specialInstructions,
+        recipeSnapshot: itemData.recipeSnapshot,
         kitchenId: itemData.kitchenId, // Store kitchen assignment
         courseId: itemData.courseId, // Store course assignment (snapshot)
         courseName: itemData.courseName, // Store course name (snapshot)
@@ -935,6 +952,12 @@ export class OrdersService {
       // Priority: item-level kitchen > category-level kitchen > default kitchen
       const newOrderItemsData = await Promise.all(
         addItemsDto.items.map(async (item, index) => {
+          if (!item.recipeSnapshot || item.recipeSnapshot.length === 0) {
+            throw new BadRequestException(
+              `Missing recipe snapshot for menu item ${item.menuItemId}`,
+            );
+          }
+
           const validatedItem = validatedItems[index];
           const totalPrice = validatedItem.price * item.quantity;
 
@@ -991,6 +1014,7 @@ export class OrdersService {
             quantity: item.quantity,
             totalPrice,
             specialInstructions: item.specialInstructions,
+            recipeSnapshot: item.recipeSnapshot,
             kitchenId: new Types.ObjectId(resolvedKitchen.kitchenId),
             kitchenName: kitchen.name, // Use validated kitchen name
             itemStatus: 'PENDING' as const, // New items start as PENDING
@@ -1015,6 +1039,7 @@ export class OrdersService {
         quantity: itemData.quantity,
         totalPrice: itemData.totalPrice,
         specialInstructions: itemData.specialInstructions,
+        recipeSnapshot: itemData.recipeSnapshot,
         kitchenId: itemData.kitchenId, // Store kitchen assignment
         itemStatus: itemData.itemStatus,
       }));
@@ -1415,6 +1440,13 @@ export class OrdersService {
         );
       }
 
+      // Step 2.1: Disallow settlement for cancelled/voided orders
+      if (existingOrder.status === 'CANCELLED') {
+        throw new BadRequestException(
+          `Order with ID ${settleOrderDto.orderId} is cancelled and cannot be completed`,
+        );
+      }
+
       // Step 3: Check if order is billed (should be billed before settlement)
       if (existingOrder.status !== 'BILLED') {
         throw new BadRequestException(
@@ -1471,19 +1503,83 @@ export class OrdersService {
       const payment = new this.paymentModel(paymentData);
       const savedPayment = await payment.save({ session });
 
-      // Step 6: Update Order Status to COMPLETED
+      // Step 6: Load order items with recipe snapshots for inventory consumption
+      const orderItems = await this.orderItemModel
+        .find({ orderId: existingOrder._id })
+        .session(session)
+        .exec();
+
+      if (!orderItems.length) {
+        throw new BadRequestException(
+          `Order ${existingOrder._id.toString()} has no items to consume`,
+        );
+      }
+
+      const itemsMissingSnapshot = orderItems.filter(
+        (item) => !item.recipeSnapshot || item.recipeSnapshot.length === 0,
+      );
+
+      if (itemsMissingSnapshot.length > 0) {
+        const missingIds = itemsMissingSnapshot
+          .map((item) => item.menuItemId)
+          .join(', ');
+        throw new BadRequestException(
+          `Recipe snapshot missing for items: ${missingIds}`,
+        );
+      }
+
+      // Step 6.1: Resolve outletId (prefer stored value, fallback to first KOT)
+      let outletId = existingOrder.outletId;
+      if (!outletId) {
+        if (!existingOrder.kotIds || existingOrder.kotIds.length === 0) {
+          throw new BadRequestException(
+            'Cannot determine outlet for this order (no KOTs found).',
+          );
+        }
+
+        const firstKot = await this.kotModel
+          .findById(existingOrder.kotIds[0])
+          .session(session)
+          .exec();
+
+        if (!firstKot?.outletId) {
+          throw new BadRequestException(
+            'Cannot determine outlet for this order (KOT missing or invalid).',
+          );
+        }
+        outletId = firstKot.outletId;
+      }
+
+      // Step 6.2: Trigger inventory consumption BEFORE completing order
+      const inventoryPayload = {
+        orderId: existingOrder._id.toString(),
+        restaurantId: existingOrder.restaurantId,
+        outletId,
+        items: orderItems.map((item) => ({
+          menuItemId: item.menuItemId,
+          menuItemName: item.itemName,
+          quantityOrdered: item.quantity,
+          recipeSnapshot: item.recipeSnapshot,
+        })),
+      };
+
+      const inventoryResult =
+        await this.inventoryServiceClient.consumeInventory(inventoryPayload);
+
+      // Step 7: Update Order Status to COMPLETED
       await this.orderModel.findByIdAndUpdate(
         existingOrder._id,
         {
           $set: {
             status: 'COMPLETED',
             completedAt: new Date(),
+            outletId,
           },
         },
         { session, new: true },
       );
 
-      // Step 7: Update POS Session totals if session exists
+      // Step 8: Update POS Session totals if session exists
       if (existingOrder.posSessionId) {
         await this.posSessionService.updateSessionOnOrderSettlement(
           existingOrder.posSessionId,
@@ -1493,10 +1589,10 @@ export class OrdersService {
         );
       }
 
-      // Step 8: Commit transaction
+      // Step 9: Commit transaction
       await session.commitTransaction();
 
-      // Step 9: (Mock) Trigger event to TableService to mark table as VACANT
+      // Step 10: (Mock) Trigger event to TableService to mark table as VACANT
       // This is done after transaction commit to avoid blocking
       if (existingOrder.tableId) {
         await this.tableServiceClient.markTableVacant(
@@ -1504,22 +1600,16 @@ export class OrdersService {
         );
       }
 
-      // Step 10: (Mock) Trigger event to InventoryService to deduct stock
-      // Fetch all order items for inventory deduction
-      const orderItems = await this.orderItemModel
-        .find({ orderId: existingOrder._id })
-        .exec();
-
-      const inventoryItems = orderItems.map((item) => ({
-        menuItemId: item.menuItemId,
-        variantId: item.variantId,
-        quantity: item.quantity,
-      }));
-
-      await this.inventoryServiceClient.deductStock(
-        existingOrder.restaurantId,
-        inventoryItems,
+      const totalRawMaterials = inventoryPayload.items.reduce(
+        (count, item) => count + item.recipeSnapshot.length,
+        0,
       );
+
+      this.logger.log('Inventory consumed on order completion', {
+        orderId: existingOrder._id.toString(),
+        totalRawMaterials,
+        ledgerEntryIds: inventoryResult?.ledgerEntryIds || [],
+      });
 
       // Step 11: Format response
       const response: SettleOrderResponseDto = {

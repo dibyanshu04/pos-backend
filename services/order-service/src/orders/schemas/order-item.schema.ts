@@ -38,6 +38,25 @@ export class OrderItem {
   @Prop({ type: Number, required: true, min: 0 })
   totalPrice: number; // price * quantity
 
+  // Recipe Snapshot (immutable - captured at order time)
+  @Prop({
+    type: [
+      {
+        rawMaterialId: { type: String, required: true },
+        rawMaterialName: { type: String, required: true },
+        quantityPerUnit: { type: Number, required: true },
+        unit: { type: String, required: true },
+      },
+    ],
+    default: [],
+  })
+  recipeSnapshot: {
+    rawMaterialId: string;
+    rawMaterialName: string;
+    quantityPerUnit: number;
+    unit: string;
+  }[];
+
   // Special Instructions
   @Prop({ type: String })
   specialInstructions?: string; // Customer special instructions for this item
