@@ -41,8 +41,10 @@ export class Item {
   gstType?: string;
 
   // Tax References (Petpooja style - items select taxes)
-  @Prop({ type: [String], default: [] })
-  taxIds?: string[]; // Array of Tax IDs selected for this item
+  // NOTE: keep as ObjectId refs so Mongoose `.populate('taxIds')` works.
+  // Strings provided via DTO will be cast to ObjectId by Mongoose.
+  @Prop({ type: [Types.ObjectId], ref: 'Tax', default: [] })
+  taxIds?: Types.ObjectId[]; // Array of Tax IDs selected for this item
 
   // Variant References (reference to Variant module)
   @Prop({ type: [Types.ObjectId], ref: 'Variant', default: [] })
