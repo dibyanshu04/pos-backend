@@ -196,7 +196,18 @@ export class ItemsService {
       .find({ outletId, isAvailable: true })
       .sort({ displayOrder: 1 })
       .populate('variantPricing.variant', 'name')
-      .populate('addonIds', 'departmentName onlineDisplayName items addonMin addonMax addonItemSelection maxSelectionPerAddonAllowed showInOnline allowOpenQuantity rank status applicableVariantIds')
+      .populate(
+        'addonIds',
+        'departmentName onlineDisplayName items addonMin addonMax addonItemSelection maxSelectionPerAddonAllowed showInOnline allowOpenQuantity rank status applicableVariantIds',
+      )
+      .populate({
+        path: 'taxIds',
+        match: { isActive: true },
+        select:
+          'name value taxType calculationType taxTitle gstComponent displayName priority',
+        options: { sort: { priority: 1 } },
+      })
+
       .exec();
   }
 
