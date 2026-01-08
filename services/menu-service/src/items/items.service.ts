@@ -45,7 +45,7 @@ export class ItemsService {
     // Populate addons and variants before returning
     const populatedItem = await this.itemModel
       .findById(createdItem._id)
-      .populate('variants', 'name values department isRequired minSelection maxSelection rank')
+      .populate('variantPricing.variant', 'name')
       .populate('addonIds', 'departmentName onlineDisplayName items addonMin addonMax addonItemSelection maxSelectionPerAddonAllowed showInOnline allowOpenQuantity rank status applicableVariantIds')
       .exec();
     
@@ -65,7 +65,7 @@ export class ItemsService {
     return this.itemModel
       .find(filter)
       .sort({ displayOrder: 1 })
-      .populate('variants', 'name values department isRequired minSelection maxSelection rank')
+      .populate('variantPricing.variant', 'name')
       .populate('addonIds', 'departmentName onlineDisplayName items addonMin addonMax addonItemSelection maxSelectionPerAddonAllowed showInOnline allowOpenQuantity rank status applicableVariantIds')
       .exec();
   }
@@ -73,7 +73,7 @@ export class ItemsService {
   async findOne(id: string): Promise<Item> {
     const item = await this.itemModel
       .findById(id)
-      .populate('variants', 'name values department isRequired minSelection maxSelection rank')
+      .populate('variantPricing.variant', 'name')
       .populate('variantPricing.variant', 'name values department')
       .populate('addonIds', 'departmentName onlineDisplayName items addonMin addonMax addonItemSelection maxSelectionPerAddonAllowed showInOnline allowOpenQuantity rank status applicableVariantIds')
       .exec();
@@ -86,7 +86,7 @@ export class ItemsService {
   async findOneWithTaxes(id: string): Promise<any> {
     const item = await this.itemModel
       .findById(id)
-      .populate('variants', 'name values department isRequired minSelection maxSelection rank')
+      .populate('variantPricing.variant', 'name')
       .populate('addonIds', 'departmentName onlineDisplayName items addonMin addonMax addonItemSelection maxSelectionPerAddonAllowed showInOnline allowOpenQuantity rank status applicableVariantIds')
       .exec();
     if (!item) {
@@ -126,7 +126,7 @@ export class ItemsService {
     const items = await this.itemModel
       .find(filter)
       .sort({ displayOrder: 1 })
-      .populate('variants', 'name values department isRequired minSelection maxSelection rank')
+      .populate('variantPricing.variant', 'name')
       .populate('addonIds', 'departmentName onlineDisplayName items addonMin addonMax addonItemSelection maxSelectionPerAddonAllowed showInOnline allowOpenQuantity rank status applicableVariantIds')
       .exec();
     
@@ -164,7 +164,7 @@ export class ItemsService {
   async update(id: string, updateItemDto: UpdateItemDto): Promise<Item> {
     const updatedItem = await this.itemModel
       .findByIdAndUpdate(id, updateItemDto, { new: true })
-      .populate('variants', 'name values department isRequired minSelection maxSelection rank')
+      .populate('variantPricing.variant', 'name')
       .populate('addonIds', 'departmentName onlineDisplayName items addonMin addonMax addonItemSelection maxSelectionPerAddonAllowed showInOnline allowOpenQuantity rank status applicableVariantIds')
       .exec();
 
@@ -186,7 +186,7 @@ export class ItemsService {
     return this.itemModel
       .find({ categoryId, isAvailable: true })
       .sort({ displayOrder: 1 })
-      .populate('variants', 'name values department isRequired minSelection maxSelection rank')
+      .populate('variants', 'name')
       .populate('addonIds', 'departmentName onlineDisplayName items addonMin addonMax addonItemSelection maxSelectionPerAddonAllowed showInOnline allowOpenQuantity rank status applicableVariantIds')
       .exec();
   }
@@ -195,7 +195,7 @@ export class ItemsService {
     return this.itemModel
       .find({ outletId, isAvailable: true })
       .sort({ displayOrder: 1 })
-      .populate('variants', 'name values department isRequired minSelection maxSelection rank')
+      .populate('variantPricing.variant', 'name')
       .populate('addonIds', 'departmentName onlineDisplayName items addonMin addonMax addonItemSelection maxSelectionPerAddonAllowed showInOnline allowOpenQuantity rank status applicableVariantIds')
       .exec();
   }
@@ -206,7 +206,7 @@ export class ItemsService {
   ): Promise<Item> {
     const item = await this.itemModel
       .findByIdAndUpdate(itemId, { isAvailable }, { new: true })
-      .populate('variants', 'name values department isRequired minSelection maxSelection rank')
+      .populate('variantPricing.variant', 'name')
       .populate('addonIds', 'departmentName onlineDisplayName items addonMin addonMax addonItemSelection maxSelectionPerAddonAllowed showInOnline allowOpenQuantity rank status applicableVariantIds')
       .exec();
 
@@ -238,7 +238,7 @@ export class ItemsService {
 
     const item = await this.itemModel
       .findByIdAndUpdate(itemId, updateQuery, { new: true })
-      .populate('variants', 'name values department isRequired minSelection maxSelection rank')
+      .populate('variantPricing.variant', 'name')
       .populate('addonIds', 'departmentName onlineDisplayName items addonMin addonMax addonItemSelection maxSelectionPerAddonAllowed showInOnline allowOpenQuantity rank status applicableVariantIds')
       .exec();
 
