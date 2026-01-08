@@ -1,28 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import {
-  IsString,
-  IsEnum,
-  IsOptional,
-  IsBoolean,
-  IsArray,
-  ValidateNested,
-} from 'class-validator';
-import { Type } from 'class-transformer';
-
-export class CategoryDto {
-  @ApiProperty()
-  @IsString()
-  name: string;
-
-  @ApiProperty({ required: false })
-  @IsOptional()
-  @IsString()
-  description?: string;
-
-  @ApiProperty({ required: false })
-  @IsOptional()
-  displayOrder?: number;
-}
+import { IsString, IsEnum, IsOptional, IsBoolean, IsArray } from 'class-validator';
 
 export class CreateMenuDto {
   @ApiProperty()
@@ -52,10 +29,23 @@ export class CreateMenuDto {
   @IsBoolean()
   isActive?: boolean;
 
-  @ApiProperty({ type: [CategoryDto], required: false })
+  @ApiProperty({
+    type: [String],
+    required: false,
+    description: 'Category IDs linked to this menu',
+  })
   @IsOptional()
   @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => CategoryDto)
-  categories?: CategoryDto[];
+  @IsString({ each: true })
+  categoryIds?: string[];
+
+  @ApiProperty({
+    type: [String],
+    required: false,
+    description: 'Item IDs linked to this menu',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  itemIds?: string[];
 }

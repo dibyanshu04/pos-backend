@@ -1,21 +1,28 @@
 import { PartialType } from '@nestjs/swagger';
-import { CreateMenuDto, CategoryDto } from './create-menu.dto';
+import { CreateMenuDto } from './create-menu.dto';
 import { ApiProperty } from '@nestjs/swagger';
-import {
-  IsOptional,
-  IsArray,
-  ValidateNested,
-  IsBoolean,
-} from 'class-validator';
-import { Type } from 'class-transformer';
+import { IsOptional, IsArray, IsBoolean, IsString } from 'class-validator';
 
 export class UpdateMenuDto extends PartialType(CreateMenuDto) {
-  @ApiProperty({ type: [CategoryDto], required: false })
+  @ApiProperty({
+    type: [String],
+    required: false,
+    description: 'Category IDs linked to this menu',
+  })
   @IsOptional()
   @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => CategoryDto)
-  categories?: CategoryDto[];
+  @IsString({ each: true })
+  categoryIds?: string[];
+
+  @ApiProperty({
+    type: [String],
+    required: false,
+    description: 'Item IDs linked to this menu',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  itemIds?: string[];
 
   @ApiProperty({ required: false })
   @IsOptional()
