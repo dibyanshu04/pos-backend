@@ -6,15 +6,19 @@ import { CreateItemDto } from './dto/create-item.dto';
 import { UpdateItemDto } from './dto/update-item.dto';
 import { Item, ItemDocument } from './schema/item.schema';
 import { Tax, TaxDocument } from '../taxes/schema/taxes.schema';
+import { Menu, MenuDocument } from '../menus/schema/menu.schema';
 
 @Injectable()
 export class ItemsService {
   constructor(
     @InjectModel(Item.name) private itemModel: Model<ItemDocument>,
     @InjectModel(Tax.name) private taxModel: Model<TaxDocument>,
+    @InjectModel(Menu.name) private menuModel: Model<MenuDocument>,
   ) {}
 
   async create(createItemDto: CreateItemDto): Promise<Item> {
+    const { menuId, ...itemPayload } = createItemDto;
+
     // If this is a channel item, validate base item exists
     if (createItemDto.baseItemId) {
       const baseItem = await this.itemModel.findById(createItemDto.baseItemId);
@@ -23,8 +27,20 @@ export class ItemsService {
       }
     }
 
-    const createdItem = new this.itemModel(createItemDto);
+    const createdItem = new this.itemModel(itemPayload);
     await createdItem.save();
+
+    if (menuId) {
+      const updatedMenu = await this.menuModel.findByIdAndUpdate(
+        menuId,
+        { $addToSet: { itemIds: createdItem._id } },
+        { new: true },
+      );
+
+      if (!updatedMenu) {
+        throw new NotFoundException('Menu not found');
+      }
+    }
     
     // Populate addons and variants before returning
     const populatedItem = await this.itemModel

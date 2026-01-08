@@ -28,6 +28,10 @@ export class CreateItemDto {
   @IsString()
   name: string;
 
+  @ApiProperty({ description: 'Menu ID to attach the item to' })
+  @IsString()
+  menuId: string;
+
   @ApiProperty({ required: false })
   @IsOptional()
   @IsString()
