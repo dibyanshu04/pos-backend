@@ -49,6 +49,7 @@ export class BillResponseDto {
   totalTax: number;
   discount: number;
   discountReason?: string;
+  totalCOGS?: number; // Snapshot of total COGS for the order
   grossAmount?: number; // Gross amount before round-off
   roundOffAmount?: number; // Round-off adjustment
   netPayable?: number; // Final payable amount after round-off

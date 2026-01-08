@@ -93,6 +93,10 @@ export class Order {
   @Prop({ type: Number, required: false, default: 0, min: 0 })
   netPayable?: number; // Final amount to be paid (after round-off)
 
+  // Cost of Goods Sold snapshot (immutable once set at completion)
+  @Prop({ type: Number, required: false, default: 0, min: 0 })
+  totalCOGS?: number;
+
   // Additional metadata
   @Prop({ type: String })
   notes?: string; // Order notes/comments

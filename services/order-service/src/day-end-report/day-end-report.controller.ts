@@ -76,13 +76,71 @@ export class DayEndReportController {
   @ApiOperation({
     summary: 'Generate Z-Report (Final Day-End Report)',
     description:
-      'Generates a final Z-Report for the active POS session. This closes the session, locks all orders, and creates an immutable financial record. Can only be generated once per session.',
+      'Generates a final Z-Report for the active POS session. Includes only COMPLETED, non-voided orders for the business day, aggregates strictly from stored bill snapshots (grossAmount, discount, netPayable, totalCOGS), and blocks generation if any pending/incomplete orders or missing billing snapshots exist. Computes grossProfit/grossMargin from snapshots without re-running inventory or COGS, enforces one report per outlet per business day, and closes the session. Category-level profit is included when category snapshots exist.',
   })
   @ApiBody({ type: GenerateZReportDto })
   @ApiResponse({
     status: 201,
-    description: 'Z-Report generated successfully',
+    description:
+      'Z-Report generated successfully (profit/margin from stored bill snapshots; includes only COMPLETED, non-voided orders in the business day; fails if pending orders or missing billing snapshots).',
     type: ZReportResponseDto,
+    content: {
+      'application/json': {
+        example: {
+          success: true,
+          message: 'Z-Report generated successfully. POS Session has been closed.',
+          data: {
+            reportId: '507f1f77bcf86cd799439011',
+            posSessionId: '507f1f77bcf86cd799439022',
+            sessionNumber: 'SESS-2026-01-08-001',
+            restaurantId: 'rest-1',
+            outletId: 'outlet-1',
+            reportType: 'Z',
+            businessDay: '2026-01-08T00:00:00.000Z',
+            openingCash: 5000,
+            closingCash: 7800,
+            expectedCash: 7600,
+            cashDifference: 200,
+            cashStatus: 'EXCESS',
+            totalOrders: 42,
+            totalSales: 18250.5,
+            totalGrossSales: 19000,
+            totalDiscounts: 750,
+            netSales: 18250.5,
+            totalCOGS: 9200.75,
+            grossProfit: 9050,
+            grossMarginPercent: 49.6,
+            totalDiscount: 750,
+            totalTax: 950.5,
+            totalComplimentaryItemsValue: 300,
+            totalComplimentaryItemsCount: 4,
+            totalVoidedBills: 1,
+            totalVoidedAmount: 450,
+            totalCreditBills: 2,
+            totalCreditOutstanding: 1200,
+            totalCreditSettled: 500,
+            paymentSummary: {
+              CASH: 9000,
+              CARD: 7000,
+              UPI: 2000,
+              WALLET: 500,
+              NET_BANKING: 0,
+              CREDIT: 1200,
+              OTHER: 0,
+            },
+            categoryWise: [
+              { categoryId: 'cat-1', categoryName: 'Starters', sales: 6000, cogs: 2400, profit: 3600 },
+              { categoryId: 'cat-2', categoryName: 'Mains', sales: 9000, cogs: 4500, profit: 4500 },
+            ],
+            staffSummary: [],
+            generatedByUserId: 'user-1',
+            generatedAt: '2026-01-08T18:30:00.000Z',
+            notes: 'Day end settlement completed',
+          },
+          timestamp: '2026-01-08T18:31:00.000Z',
+        },
+      },
+    },
   })
   @ApiResponse({
     status: 400,
@@ -144,7 +202,7 @@ export class DayEndReportController {
   @ApiOperation({
     summary: 'Get Z-Reports with filters',
     description:
-      'Retrieves Z-Reports with optional filters (outlet, restaurant, date)',
+      'Retrieves Z-Reports with optional filters (outlet, restaurant, date). Uses stored snapshot values only; date filter is applied on businessDay (outlet local start-of-day).',
   })
   @ApiQuery({ name: 'outletId', required: false, type: String })
   @ApiQuery({ name: 'restaurantId', required: false, type: String })
@@ -152,7 +210,8 @@ export class DayEndReportController {
     name: 'date',
     required: false,
     type: String,
-    description: 'Date filter (ISO 8601 format, e.g., 2024-01-15)',
+    description:
+      'Business day filter (outlet local start-of-day, ISO 8601 format, e.g., 2024-01-15)',
   })
   @ApiResponse({
     status: 200,

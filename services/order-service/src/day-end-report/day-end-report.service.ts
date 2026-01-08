@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { InjectModel, InjectConnection } from '@nestjs/mongoose';
 import { Model, Connection, ClientSession, Types } from 'mongoose';
@@ -22,6 +23,8 @@ import { ZReportResponseDto } from './dto/z-report-response.dto';
 
 @Injectable()
 export class DayEndReportService {
+  private readonly logger = new Logger(DayEndReportService.name);
+
   constructor(
     @InjectModel(DayEndReport.name)
     private dayEndReportModel: Model<DayEndReportDocument>,
@@ -201,11 +204,50 @@ export class DayEndReportService {
         );
       }
 
+      // Step 2a: Enforce one Z-Report per outlet per business day (outlet local time)
+      const reportDate = new Date(activeSession.openedAt);
+      const startOfDay = new Date(reportDate);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(reportDate);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      const outletDayReport = await this.dayEndReportModel
+        .findOne({
+          outletId: generateZReportDto.outletId,
+          $or: [
+            {
+              businessDay: {
+                $gte: startOfDay,
+                $lte: endOfDay,
+              },
+            },
+            {
+              $and: [
+                { businessDay: { $exists: false } },
+                {
+                  generatedAt: {
+                    $gte: startOfDay,
+                    $lte: endOfDay,
+                  },
+                },
+              ],
+            },
+          ],
+        })
+        .session(session)
+        .exec();
+
+      if (outletDayReport) {
+        throw new BadRequestException(
+          'Z-Report already exists for this outlet and business day. Only one Z-Report is allowed per outlet per day.',
+        );
+      }
+
       // Step 3: Check for pending orders (DRAFT or BILLED but not COMPLETED)
       const pendingOrders = await this.orderModel
         .find({
           posSessionId: activeSession._id,
-          status: { $in: ['DRAFT', 'BILLED'] },
+          status: { $nin: ['COMPLETED', 'CANCELLED', 'VOIDED'] },
         })
         .session(session)
         .exec();
@@ -231,28 +273,78 @@ export class DayEndReportService {
         );
       }
 
-      // Step 6: Aggregate orders for final summary (excluding voided bills)
-      const orderStats = await this.orderModel
+      // Step 6: Select completed, non-voided orders within the business day (Petpooja)
+      const reportOrderMatch = {
+        posSessionId: activeSession._id,
+        status: 'COMPLETED',
+        isVoided: { $ne: true },
+        completedAt: { $gte: startOfDay, $lte: endOfDay },
+      };
+
+      const completedOrders = await this.orderModel
+        .find(reportOrderMatch)
+        .session(session)
+        .exec();
+
+      const missingBillingSnapshots = completedOrders.filter(
+        (order) =>
+          order.grossAmount === undefined ||
+          order.grossAmount === null ||
+          order.netPayable === undefined ||
+          order.netPayable === null ||
+          order.discount === undefined ||
+          order.discount === null ||
+          order.totalCOGS === undefined ||
+          order.totalCOGS === null,
+      );
+
+      if (missingBillingSnapshots.length > 0) {
+        throw new BadRequestException(
+          'Cannot generate Z-Report. Some completed orders are missing billing snapshots (grossAmount/netPayable/discount/totalCOGS). Please finalize billing snapshots before closing the session.',
+        );
+      }
+
+      const orderFinancials = await this.orderModel
         .aggregate([
-          {
-            $match: {
-              posSessionId: activeSession._id,
-              status: { $in: ['BILLED', 'COMPLETED'] },
-              isVoided: { $ne: true }, // Exclude voided bills
-            },
-          },
+          { $match: reportOrderMatch },
           {
             $group: {
               _id: null,
               totalOrders: { $sum: 1 },
-              totalSales: { $sum: '$netPayable' }, // Use netPayable (after round-off)
-              totalDiscount: { $sum: '$discount' },
-              totalTax: { $sum: '$tax' },
+              totalGrossSales: { $sum: { $ifNull: ['$grossAmount', 0] } },
+              totalDiscounts: { $sum: { $ifNull: ['$discount', 0] } },
+              totalTax: { $sum: { $ifNull: ['$tax', 0] } },
+              netSales: { $sum: { $ifNull: ['$netPayable', 0] } },
+              totalCOGS: { $sum: { $ifNull: ['$totalCOGS', 0] } },
             },
           },
         ])
         .session(session)
         .exec();
+
+      const orderStats = orderFinancials[0] || {
+        totalOrders: 0,
+        totalGrossSales: 0,
+        totalDiscounts: 0,
+        totalTax: 0,
+        netSales: 0,
+        totalCOGS: 0,
+      };
+
+      if (orderStats.netSales < 0) {
+        throw new BadRequestException('netSales cannot be negative for Z-Report.');
+      }
+
+      if (orderStats.totalCOGS < 0) {
+        throw new BadRequestException('totalCOGS cannot be negative for Z-Report.');
+      }
+
+      const grossProfitRaw = orderStats.netSales - orderStats.totalCOGS;
+      const grossProfit = Number(grossProfitRaw.toFixed(2));
+      const grossMarginPercent =
+        orderStats.netSales > 0
+          ? Number(((grossProfit / orderStats.netSales) * 100).toFixed(2))
+          : 0;
 
       // Aggregate voided bills separately
       const voidedBillsStats = await this.orderModel
@@ -274,49 +366,78 @@ export class DayEndReportService {
         .session(session)
         .exec();
 
-      // Aggregate complimentary items (query OrderItems directly)
-      // First get all order IDs for this session
-      const sessionOrderIds = await this.orderModel
-        .find({
-          posSessionId: activeSession._id,
-          status: { $in: ['BILLED', 'COMPLETED'] },
-          isVoided: { $ne: true },
-        })
-        .select('_id')
-        .session(session)
-        .lean()
-        .exec();
+      const orderIds = completedOrders.map((o) => o._id);
 
-      const orderIds = sessionOrderIds.map((o) => o._id);
-
-      // Now aggregate complimentary items
-      const complimentaryItemsStats = await this.orderItemModel
-        .aggregate([
-          {
-            $match: {
-              orderId: { $in: orderIds },
-              isComplimentary: true,
-            },
-          },
-          {
-            $group: {
-              _id: null,
-              totalComplimentaryItemsCount: { $sum: '$quantity' },
-              totalComplimentaryItemsValue: {
-                $sum: {
-                  // Use original price before complimentary (stored in taxableAmount or calculate from base price)
-                  $cond: [
-                    { $gt: ['$taxableAmount', 0] },
-                    { $multiply: ['$taxableAmount', '$quantity'] },
-                    { $multiply: ['$price', '$quantity'] },
-                  ],
+      // Aggregate complimentary items (completed, non-voided orders)
+      const complimentaryItemsStats =
+        orderIds.length > 0
+          ? await this.orderItemModel
+              .aggregate([
+                {
+                  $match: {
+                    orderId: { $in: orderIds },
+                    isComplimentary: true,
+                  },
                 },
-              },
-            },
-          },
-        ])
-        .session(session)
-        .exec();
+                {
+                  $group: {
+                    _id: null,
+                    totalComplimentaryItemsCount: { $sum: '$quantity' },
+                    totalComplimentaryItemsValue: {
+                      $sum: {
+                        // Use original price before complimentary (stored in taxableAmount or calculate from base price)
+                        $cond: [
+                          { $gt: ['$taxableAmount', 0] },
+                          { $multiply: ['$taxableAmount', '$quantity'] },
+                          { $multiply: ['$price', '$quantity'] },
+                        ],
+                      },
+                    },
+                  },
+                },
+              ])
+              .session(session)
+              .exec()
+          : [];
+
+      // Optional: Category-wise profit snapshot when category snapshot exists
+      const categoryWise =
+        orderIds.length > 0
+          ? await this.orderItemModel
+              .aggregate([
+                {
+                  $match: {
+                    orderId: { $in: orderIds },
+                    categoryId: { $exists: true, $ne: null },
+                    categoryName: { $exists: true, $ne: null },
+                    isComplimentary: { $ne: true },
+                  },
+                },
+                {
+                  $group: {
+                    _id: { categoryId: '$categoryId', categoryName: '$categoryName' },
+                    sales: {
+                      $sum: {
+                        $ifNull: ['$finalItemTotal', '$totalPrice'],
+                      },
+                    },
+                    cogs: { $sum: { $ifNull: ['$cogs.totalCost', 0] } },
+                  },
+                },
+                {
+                  $project: {
+                    _id: 0,
+                    categoryId: '$_id.categoryId',
+                    categoryName: '$_id.categoryName',
+                    sales: 1,
+                    cogs: 1,
+                    profit: { $subtract: ['$sales', '$cogs'] },
+                  },
+                },
+              ])
+              .session(session)
+              .exec()
+          : [];
 
       // Aggregate credit bills
       const creditBillsStats = await this.paymentModel
@@ -497,10 +618,16 @@ export class DayEndReportService {
         expectedCash,
         cashDifference,
         cashStatus,
-        totalOrders: orderStats[0]?.totalOrders || 0,
-        totalSales: orderStats[0]?.totalSales || 0,
-        totalDiscount: orderStats[0]?.totalDiscount || 0,
-        totalTax: orderStats[0]?.totalTax || 0,
+        totalOrders: orderStats.totalOrders || 0,
+        totalSales: orderStats.netSales || 0,
+        totalGrossSales: orderStats.totalGrossSales || 0,
+        totalDiscounts: orderStats.totalDiscounts || 0,
+        netSales: orderStats.netSales || 0,
+        totalCOGS: orderStats.totalCOGS || 0,
+        grossProfit,
+        grossMarginPercent,
+        totalDiscount: orderStats.totalDiscounts || 0,
+        totalTax: orderStats.totalTax || 0,
         // Complimentary Items Summary
         totalComplimentaryItemsValue:
           complimentaryItemsStats[0]?.totalComplimentaryItemsValue || 0,
@@ -515,9 +642,11 @@ export class DayEndReportService {
           creditBillsStats[0]?.totalCreditOutstanding || 0,
         totalCreditSettled: creditBillsStats[0]?.totalCreditSettled || 0,
         paymentSummary,
+        categoryWise,
         staffSummary,
         generatedByUserId: userId,
         generatedAt: new Date(),
+        businessDay: startOfDay,
         notes: generateZReportDto.notes,
       });
 
@@ -549,6 +678,20 @@ export class DayEndReportService {
       // Step 17: Commit transaction
       await session.commitTransaction();
 
+      this.logger.log({
+        event: 'z-report-generated',
+        outletId: generateZReportDto.outletId,
+        reportId: savedReport._id.toString(),
+        dateRange: {
+          start: startOfDay.toISOString(),
+          end: endOfDay.toISOString(),
+        },
+        totalOrders: orderStats.totalOrders,
+        netSales: orderStats.netSales,
+        totalCOGS: orderStats.totalCOGS,
+        grossProfit,
+      });
+
       // Step 18: Format response
       return {
         reportId: savedReport._id.toString(),
@@ -564,6 +707,12 @@ export class DayEndReportService {
         cashStatus: savedReport.cashStatus,
         totalOrders: savedReport.totalOrders,
         totalSales: savedReport.totalSales,
+        totalGrossSales: savedReport.totalGrossSales,
+        totalDiscounts: savedReport.totalDiscounts,
+        netSales: savedReport.netSales,
+        totalCOGS: savedReport.totalCOGS,
+        grossProfit: savedReport.grossProfit,
+        grossMarginPercent: savedReport.grossMarginPercent,
         totalDiscount: savedReport.totalDiscount,
         totalTax: savedReport.totalTax,
         totalComplimentaryItemsValue:
@@ -576,9 +725,11 @@ export class DayEndReportService {
         totalCreditOutstanding: savedReport.totalCreditOutstanding,
         totalCreditSettled: savedReport.totalCreditSettled,
         paymentSummary: savedReport.paymentSummary,
+        categoryWise: savedReport.categoryWise || [],
         staffSummary: savedReport.staffSummary,
         generatedByUserId: savedReport.generatedByUserId,
         generatedAt: savedReport.generatedAt,
+        businessDay: savedReport.businessDay || startOfDay,
         notes: savedReport.notes,
       };
     } catch (error) {
@@ -786,13 +937,21 @@ export class DayEndReportService {
       cashDifference: report.cashDifference,
       cashStatus: report.cashStatus,
       totalOrders: report.totalOrders,
-      totalSales: report.totalSales,
-      totalDiscount: report.totalDiscount,
-      totalTax: report.totalTax,
+      totalSales: report.totalSales ?? 0,
+      totalGrossSales: report.totalGrossSales ?? 0,
+      totalDiscounts: report.totalDiscounts ?? 0,
+      netSales: report.netSales ?? 0,
+      totalCOGS: report.totalCOGS ?? 0,
+      grossProfit: report.grossProfit ?? 0,
+      grossMarginPercent: report.grossMarginPercent ?? 0,
+      totalDiscount: report.totalDiscount ?? 0,
+      totalTax: report.totalTax ?? 0,
       paymentSummary: report.paymentSummary,
+      categoryWise: report.categoryWise || [],
       staffSummary: report.staffSummary,
       generatedByUserId: report.generatedByUserId,
       generatedAt: report.generatedAt,
+      businessDay: report.businessDay || report.generatedAt,
       notes: report.notes,
     };
   }
@@ -821,10 +980,33 @@ export class DayEndReportService {
       const endDate = new Date(filters.date);
       endDate.setHours(23, 59, 59, 999);
 
-      query.generatedAt = {
-        $gte: startDate,
-        $lte: endDate,
+      const dateFilter = {
+        $or: [
+          {
+            businessDay: {
+              $gte: startDate,
+              $lte: endDate,
+            },
+          },
+          {
+            $and: [
+              { businessDay: { $exists: false } },
+              {
+                generatedAt: {
+                  $gte: startDate,
+                  $lte: endDate,
+                },
+              },
+            ],
+          },
+        ],
       };
+
+      if (query.$and) {
+        query.$and.push(dateFilter);
+      } else {
+        query.$and = [dateFilter];
+      }
     }
 
     const reports = await this.dayEndReportModel
@@ -854,13 +1036,21 @@ export class DayEndReportService {
       cashDifference: report.cashDifference,
       cashStatus: report.cashStatus,
       totalOrders: report.totalOrders,
-      totalSales: report.totalSales,
-      totalDiscount: report.totalDiscount,
-      totalTax: report.totalTax,
+      totalSales: report.totalSales ?? 0,
+      totalGrossSales: report.totalGrossSales ?? 0,
+      totalDiscounts: report.totalDiscounts ?? 0,
+      netSales: report.netSales ?? 0,
+      totalCOGS: report.totalCOGS ?? 0,
+      grossProfit: report.grossProfit ?? 0,
+      grossMarginPercent: report.grossMarginPercent ?? 0,
+      totalDiscount: report.totalDiscount ?? 0,
+      totalTax: report.totalTax ?? 0,
       paymentSummary: report.paymentSummary,
+      categoryWise: report.categoryWise || [],
       staffSummary: report.staffSummary,
       generatedByUserId: report.generatedByUserId,
       generatedAt: report.generatedAt,
+      businessDay: report.businessDay || report.generatedAt,
       notes: report.notes,
     }));
   }

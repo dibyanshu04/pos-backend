@@ -26,6 +26,12 @@ export interface InventoryConsumptionPayload {
   items: InventoryConsumptionItem[];
 }
 
+export interface RawMaterialCostSnapshot {
+  [rawMaterialId: string]: {
+    averageCost: number;
+  };
+}
+
 @Injectable()
 export class InventoryServiceClient {
   private readonly client: AxiosInstance;
@@ -55,6 +61,32 @@ export class InventoryServiceClient {
       if (error.response?.data) {
         const message =
           error.response.data?.message || 'Inventory consumption failed';
+        throw new BadRequestException(message);
+      }
+      throw new InternalServerErrorException(
+        'Inventory service is unavailable. Please retry.',
+      );
+    }
+  }
+
+  async getRawMaterialCostSnapshot(
+    rawMaterialIds: string[],
+  ): Promise<RawMaterialCostSnapshot> {
+    try {
+      const response = await this.client.post(
+        '/internal/raw-materials/cost-snapshot',
+        { rawMaterialIds },
+        {
+          headers: {
+            'x-internal-token': process.env.INVENTORY_INTERNAL_TOKEN || '',
+          },
+        },
+      );
+      return response.data;
+    } catch (error: any) {
+      if (error.response?.data) {
+        const message =
+          error.response.data?.message || 'Failed to fetch cost snapshot';
         throw new BadRequestException(message);
       }
       throw new InternalServerErrorException(

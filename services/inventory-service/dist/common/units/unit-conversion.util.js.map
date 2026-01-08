@@ -1,0 +1,1 @@
+{"version":3,"file":"unit-conversion.util.js","sourceRoot":"","sources":["../../../src/common/units/unit-conversion.util.ts"],"names":[],"mappings":";;AAQA,8CASC;AAfD,iEAAmE;AAMnE,SAAgB,iBAAiB,CAC/B,QAAgB,EAChB,YAA8B,EAC9B,QAAsB,EACtB,gBAAwB;IAExB,IAAA,gDAAyB,EAAC,YAAY,EAAE,QAAQ,CAAC,CAAC;IAElD,OAAO,QAAQ,GAAG,gBAAgB,CAAC;AACrC,CAAC"}

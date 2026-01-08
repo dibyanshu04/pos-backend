@@ -3,6 +3,28 @@ import { Document, Types } from 'mongoose';
 
 export type DayEndReportDocument = DayEndReport & Document;
 
+// Category Profit Snapshot (optional)
+@Schema({ _id: false })
+export class CategoryProfitSnapshot {
+  @Prop({ type: String, required: true })
+  categoryId: string;
+
+  @Prop({ type: String, required: true })
+  categoryName: string;
+
+  @Prop({ type: Number, required: true, default: 0 })
+  sales: number;
+
+  @Prop({ type: Number, required: true, default: 0 })
+  cogs: number;
+
+  @Prop({ type: Number, required: true, default: 0 })
+  profit: number;
+}
+
+export const CategoryProfitSnapshotSchema =
+  SchemaFactory.createForClass(CategoryProfitSnapshot);
+
 // Staff Summary Subdocument
 @Schema({ _id: false })
 export class StaffSummary {
@@ -114,6 +136,25 @@ export class DayEndReport {
   @Prop({ type: Number, required: true, default: 0, min: 0 })
   totalSales: number;
 
+  // Petpooja Profit & Margin Snapshot (immutable)
+  @Prop({ type: Number, required: true, default: 0, min: 0, immutable: true })
+  totalGrossSales: number; // before discounts
+
+  @Prop({ type: Number, required: true, default: 0, min: 0, immutable: true })
+  totalDiscounts: number;
+
+  @Prop({ type: Number, required: true, default: 0, min: 0, immutable: true })
+  netSales: number; // after discounts and round-off
+
+  @Prop({ type: Number, required: true, default: 0, min: 0, immutable: true })
+  totalCOGS: number; // sum of order.bill.totalCOGS (snapshot)
+
+  @Prop({ type: Number, required: true, default: 0, immutable: true })
+  grossProfit: number; // netSales - totalCOGS (can be negative)
+
+  @Prop({ type: Number, required: true, default: 0, immutable: true })
+  grossMarginPercent: number; // (grossProfit / netSales) * 100, rounded
+
   @Prop({ type: Number, required: true, default: 0, min: 0 })
   totalDiscount: number;
 
@@ -148,9 +189,17 @@ export class DayEndReport {
   @Prop({ type: ReportPaymentSummarySchema, required: true })
   paymentSummary: ReportPaymentSummary;
 
+  // Category-wise profit snapshot (optional)
+  @Prop({ type: [CategoryProfitSnapshotSchema], default: [], immutable: true })
+  categoryWise?: CategoryProfitSnapshot[];
+
   // Staff Summary (snapshot of all shifts in session)
   @Prop({ type: [StaffSummarySchema], default: [] })
   staffSummary: StaffSummary[];
+
+  // Business day snapshot (outlet local start-of-day)
+  @Prop({ type: Date, required: true, immutable: true, index: true })
+  businessDay: Date;
 
   // Generation Information
   @Prop({ type: String, required: true, index: true })
@@ -171,4 +220,5 @@ DayEndReportSchema.index({ outletId: 1, generatedAt: -1 }); // For listing repor
 DayEndReportSchema.index({ restaurantId: 1, generatedAt: -1 }); // For listing reports by restaurant
 DayEndReportSchema.index({ posSessionId: 1 }); // Unique index already defined above
 DayEndReportSchema.index({ generatedByUserId: 1, generatedAt: -1 }); // For user-based queries
+DayEndReportSchema.index({ outletId: 1, businessDay: 1 }); // For enforcing one report per outlet-day
 

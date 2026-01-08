@@ -64,4 +64,5 @@ export class SettleOrderResponseDto {
   status: string;
   orderStatus: string;
   settledAt: Date;
+  totalCOGS?: number;
 }

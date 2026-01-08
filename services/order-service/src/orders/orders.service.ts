@@ -1454,6 +1454,7 @@ export class OrdersService {
         totalTax,
         discount,
         discountReason,
+        totalCOGS: existingOrder.totalCOGS,
         grossAmount: roundOffResult.grossAmount,
         roundOffAmount: roundOffResult.roundOffAmount,
         netPayable: roundOffResult.netPayable,
@@ -1643,6 +1644,13 @@ export class OrdersService {
       const inventoryResult =
         await this.inventoryServiceClient.consumeInventory(inventoryPayload);
 
+      // Step 6.3: Compute immutable COGS snapshot (idempotent)
+      const totalCOGS = await this.computeCogsSnapshot(
+        existingOrder,
+        orderItems,
+        session,
+      );
+
       // Step 7: Update Order Status to COMPLETED
       await this.orderModel.findByIdAndUpdate(
         existingOrder._id,
@@ -1651,6 +1659,7 @@ export class OrdersService {
             status: 'COMPLETED',
             completedAt: new Date(),
             outletId,
+            totalCOGS,
           },
         },
         { session, new: true },
@@ -1686,6 +1695,7 @@ export class OrdersService {
         orderId: existingOrder._id.toString(),
         totalRawMaterials,
         ledgerEntryIds: inventoryResult?.ledgerEntryIds || [],
+        totalCOGS,
       });
 
       // Step 11: Format response
@@ -1698,6 +1708,7 @@ export class OrdersService {
         status: savedPayment.status,
         orderStatus: 'COMPLETED',
         settledAt: new Date(),
+        totalCOGS,
       };
 
       return response;
@@ -1803,6 +1814,137 @@ export class OrdersService {
 
   private toPlainKotItem(item: any) {
     return typeof item?.toObject === 'function' ? item.toObject() : item;
+  }
+
+  /**
+   * Compute immutable COGS snapshot for an order's items.
+   * Must be called inside the same transaction as completion.
+   */
+  private async computeCogsSnapshot(
+    order: OrderDocument,
+    orderItems: OrderItemDocument[],
+    session: ClientSession,
+  ): Promise<number> {
+    const itemsHaveCogs = orderItems.every(
+      (item) => item.cogs?.breakdown && item.cogs.breakdown.length > 0,
+    );
+    if (order.totalCOGS !== undefined && itemsHaveCogs) {
+      return order.totalCOGS || 0;
+    }
+
+    const rawMaterialIds = Array.from(
+      new Set(
+        orderItems.flatMap((item) =>
+          (item.recipeSnapshot || []).map((c) => c.rawMaterialId),
+        ),
+      ),
+    );
+
+    if (!rawMaterialIds.length) {
+      throw new BadRequestException(
+        'Cannot compute COGS: recipe snapshot missing',
+      );
+    }
+
+    const costSnapshot =
+      await this.inventoryServiceClient.getRawMaterialCostSnapshot(
+        rawMaterialIds,
+      );
+
+    const contributorMap = new Map<
+      string,
+      { rawMaterialId: string; rawMaterialName: string; cost: number }
+    >();
+
+    const bulkOps: any[] = [];
+    let orderTotalCOGS = 0;
+
+    for (const item of orderItems) {
+      const breakdown =
+        (item.recipeSnapshot || []).map((component) => {
+          const quantityConsumed = item.quantity * component.quantityPerUnit;
+          if (!Number.isFinite(quantityConsumed) || quantityConsumed <= 0) {
+            throw new BadRequestException(
+              `Invalid quantity consumed for raw material ${component.rawMaterialId}`,
+            );
+          }
+
+          const costEntry = costSnapshot[component.rawMaterialId];
+          if (costEntry === undefined || costEntry.averageCost === undefined) {
+            throw new BadRequestException(
+              `Average cost missing for raw material ${component.rawMaterialId}`,
+            );
+          }
+
+          const unitCost = Number(costEntry.averageCost) || 0;
+          const cost = quantityConsumed * unitCost;
+
+          const existing = contributorMap.get(component.rawMaterialId);
+          if (existing) {
+            existing.cost += cost;
+          } else {
+            contributorMap.set(component.rawMaterialId, {
+              rawMaterialId: component.rawMaterialId,
+              rawMaterialName: component.rawMaterialName,
+              cost,
+            });
+          }
+
+          return {
+            rawMaterialId: component.rawMaterialId,
+            rawMaterialName: component.rawMaterialName,
+            quantityConsumed,
+            unitCost,
+            cost,
+          };
+        }) || [];
+
+      const itemTotalCost = breakdown.reduce(
+        (sum, comp) => sum + comp.cost,
+        0,
+      );
+      orderTotalCOGS += itemTotalCost;
+
+      bulkOps.push({
+        updateOne: {
+          filter: { _id: item._id },
+          update: {
+            $set: {
+              'cogs.totalCost': itemTotalCost,
+              'cogs.breakdown': breakdown,
+            },
+          },
+        },
+      });
+    }
+
+    if (bulkOps.length) {
+      await this.orderItemModel.bulkWrite(bulkOps, { session });
+    }
+
+    await this.orderModel.updateOne(
+      { _id: order._id },
+      { $set: { totalCOGS: orderTotalCOGS } },
+      { session },
+    );
+
+    const topContributors = Array.from(contributorMap.values())
+      .sort((a, b) => b.cost - a.cost)
+      .slice(0, 3)
+      .map((c) => ({
+        id: c.rawMaterialId,
+        name: c.rawMaterialName,
+        cost: c.cost,
+      }));
+
+    this.logger.log('COGS snapshot captured', {
+      orderId: order._id.toString(),
+      totalCOGS: orderTotalCOGS,
+      topContributors,
+      rawMaterialIds,
+    });
+
+    return orderTotalCOGS;
   }
 
   /**

@@ -20,6 +20,23 @@ export class ZReportStaffSummaryDto {
   cashCollected: number;
 }
 
+export class ZReportCategoryProfitDto {
+  @ApiProperty({ description: 'Category ID' })
+  categoryId: string;
+
+  @ApiProperty({ description: 'Category name snapshot' })
+  categoryName: string;
+
+  @ApiProperty({ description: 'Sales for the category (snapshot, after discounts)' })
+  sales: number;
+
+  @ApiProperty({ description: 'COGS for the category (snapshot)' })
+  cogs: number;
+
+  @ApiProperty({ description: 'Profit (sales - COGS) for the category' })
+  profit: number;
+}
+
 export class ZReportResponseDto {
   @ApiProperty({ description: 'Z-Report ID' })
   reportId: string;
@@ -57,8 +74,53 @@ export class ZReportResponseDto {
   @ApiProperty({ description: 'Total number of orders' })
   totalOrders: number;
 
-  @ApiProperty({ description: 'Total sales amount' })
+  @ApiProperty({
+    description:
+      'Legacy total sales (alias of net sales snapshot from stored netPayable for completed, non-voided orders in the business day)',
+  })
   totalSales: number;
+
+  @ApiProperty({
+    description:
+      'Total gross sales before discounts (snapshot from order.grossAmount for completed, non-voided orders in the business day)',
+    example: 12500.75,
+  })
+  totalGrossSales: number;
+
+  @ApiProperty({
+    description:
+      'Total discounts applied (snapshot from order.discount for completed, non-voided orders in the business day)',
+    example: 350.5,
+  })
+  totalDiscounts: number;
+
+  @ApiProperty({
+    description:
+      'Net sales after discounts and round-off (snapshot from order.netPayable for completed, non-voided orders in the business day)',
+    example: 12150.25,
+  })
+  netSales: number;
+
+  @ApiProperty({
+    description:
+      'Total COGS (sum of stored order.totalCOGS snapshot for completed, non-voided orders in the business day)',
+    example: 4800.35,
+  })
+  totalCOGS: number;
+
+  @ApiProperty({
+    description:
+      'Gross profit = netSales - totalCOGS (snapshot, no recomputation)',
+    example: 7350.9,
+  })
+  grossProfit: number;
+
+  @ApiProperty({
+    description:
+      'Gross margin % = (grossProfit / netSales) * 100, rounded to 2 decimals',
+    example: 60.5,
+  })
+  grossMarginPercent: number;
 
   @ApiProperty({ description: 'Total discount amount' })
   totalDiscount: number;
@@ -98,11 +160,24 @@ export class ZReportResponseDto {
     OTHER: number;
   };
 
+  @ApiProperty({
+    description: 'Optional category-wise profit snapshot',
+    type: [ZReportCategoryProfitDto],
+    required: false,
+  })
+  categoryWise?: ZReportCategoryProfitDto[];
+
   @ApiProperty({ description: 'Staff shift summaries', type: [ZReportStaffSummaryDto] })
   staffSummary: ZReportStaffSummaryDto[];
 
   @ApiProperty({ description: 'User who generated the report' })
   generatedByUserId: string;
+
+  @ApiProperty({
+    description:
+      'Business day (outlet local start-of-day) this Z-Report covers',
+  })
+  businessDay: Date;
 
   @ApiProperty({ description: 'Report generated at' })
   generatedAt: Date;

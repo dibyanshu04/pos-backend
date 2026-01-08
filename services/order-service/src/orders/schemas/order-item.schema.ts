@@ -28,6 +28,13 @@ export class OrderItem {
   @Prop({ type: String })
   variantName?: string; // Snapshot of variant name (e.g., "Large", "Medium")
 
+  // Category snapshot (for category-wise profit)
+  @Prop({ type: String, index: true })
+  categoryId?: string;
+
+  @Prop({ type: String })
+  categoryName?: string;
+
   // Pricing
   @Prop({ type: Number, required: true, min: 0 })
   price: number; // Unit price at time of order
@@ -73,6 +80,33 @@ export class OrderItem {
 
   @Prop({ type: Number, default: 0, min: 0 })
   finalItemTotal: number; // Final item total (must be 0 for complimentary items)
+
+  // COGS Snapshot (immutable once set)
+  @Prop({
+    type: {
+      totalCost: { type: Number, default: 0 },
+      breakdown: [
+        {
+          rawMaterialId: { type: String, required: true },
+          rawMaterialName: { type: String, required: true },
+          quantityConsumed: { type: Number, required: true },
+          unitCost: { type: Number, required: true },
+          cost: { type: Number, required: true },
+        },
+      ],
+    },
+    default: { totalCost: 0, breakdown: [] },
+  })
+  cogs: {
+    totalCost: number;
+    breakdown: {
+      rawMaterialId: string;
+      rawMaterialName: string;
+      quantityConsumed: number;
+      unitCost: number;
+      cost: number;
+    }[];
+  };
 
   // Special Instructions
   @Prop({ type: String })
