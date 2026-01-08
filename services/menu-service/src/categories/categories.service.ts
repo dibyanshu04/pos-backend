@@ -40,6 +40,14 @@ export class CategoriesService {
     return this.enrichCategoriesWithKitchen(categories);
   }
 
+  /**
+   * Return categories with kitchen info included.
+   * Added to support optional includeKitchen flag in controller.
+   */
+  async findAllWithKitchen(outletId: string): Promise<any[]> {
+    return this.findAll(outletId);
+  }
+
   async findOne(id: string): Promise<any> {
     const category = await this.categoryModel.findById(id).exec();
     if (!category) {
@@ -49,6 +57,14 @@ export class CategoriesService {
     // Enrich with kitchen information
     const enriched = await this.enrichCategoriesWithKitchen([category]);
     return enriched[0];
+  }
+
+  /**
+   * Return single category with kitchen info included.
+   * Added to support optional includeKitchen flag in controller.
+   */
+  async findOneWithKitchen(id: string): Promise<any> {
+    return this.findOne(id);
   }
 
   async update(
