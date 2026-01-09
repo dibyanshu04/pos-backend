@@ -59,7 +59,7 @@ export class MenusService {
     // Fetch items with only required fields
     const items = await this.itemModel
       .find({ _id: { $in: itemIds } })
-      .select('_id name description displayOrder isAvailable categoryId')
+      .select('_id name description displayOrder isAvailable categoryId shortCode onlineDisplayName price basePrice')
       .sort({ displayOrder: 1, name: 1 })
       .lean()
       .exec();
@@ -102,6 +102,7 @@ export class MenusService {
         if (!itemsByCategory.has(catId)) {
           itemsByCategory.set(catId, []);
         }
+        console.log('item', item);
         // Format item with categoryId as string
         itemsByCategory.get(catId)!.push({
           _id: item._id,
@@ -110,6 +111,10 @@ export class MenusService {
           description: item.description || '',
           isAvailable: item.isAvailable ?? true,
           displayOrder: item.displayOrder ?? 0,
+          shortCode: item.shortCode || '',
+          onlineDisplayName: item.onlineDisplayName || '',
+          price: item.price || 0,
+          basePrice: item.basePrice || 0,
         });
       }
     });
